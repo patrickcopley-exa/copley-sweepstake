@@ -1,0 +1,15 @@
+{
+  "name": "copley-family-sweepstake",
+  "version": "1.0.0",
+  "description": "Copley Family World Cup 2026 Sweepstake",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.22.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
