@@ -190,6 +190,15 @@
     .pot-btn-sub { font-size: 10px; font-weight: 500; opacity: 0.8; text-transform: none; letter-spacing: 0; }
     .locked-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 10px; font-weight: 700; color: var(--grey); background: var(--grey-light); padding: 3px 8px; border-radius: 20px; font-family: 'Montserrat', sans-serif; text-transform: uppercase; letter-spacing: 0.04em; }
     .paid-txt { font-family: 'Montserrat', sans-serif; font-size: 12px; font-weight: 700; color: var(--gold-dark); }
+    .manage-tbl { width:100%; border-collapse:collapse; font-size:12px; table-layout:fixed; }
+    .manage-tbl th { text-align:left; padding:7px 10px; color:var(--grey); font-family:'Montserrat',sans-serif; font-weight:700; font-size:10px; text-transform:uppercase; letter-spacing:0.06em; background:var(--offwhite); border-bottom:2px solid var(--grey-light); overflow:hidden; white-space:nowrap; }
+    .manage-tbl th:nth-child(1) { width:36px; }
+    .manage-tbl th:nth-child(2) { width:28%; }
+    .manage-tbl th:nth-child(3) { }
+    .manage-tbl th:nth-child(4) { width:70px; }
+    .manage-tbl th:nth-child(5) { width:90px; }
+    .manage-tbl td { padding:9px 10px; border-bottom:1px solid var(--grey-light); color:var(--navy); vertical-align:middle; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+    .manage-tbl tr:last-child td { border-bottom:none; }
 
     .draw-reveal { background: var(--navy); border-radius: 8px; padding: 22px; text-align: center; margin-bottom: 16px; display: none; }
     .draw-reveal.show { display: block; }
@@ -668,8 +677,8 @@ function renderManage(){
        <p style="font-size:12px;color:var(--grey)">${count} participant${count!==1?"s":""} · <span style="color:var(--gold-dark);font-weight:700">${avail1.length}</span> Pot 1 · <span style="color:#0090c8;font-weight:700">${avail2.length}</span> Pot 2 remaining</p>
        <span style="font-family:'Montserrat',sans-serif;font-size:14px;font-weight:700;color:var(--gold-dark)">Pot: £${count*2}</span>
      </div>`+
-    `<div class="twrap"><table class="tbl">
-       <thead><tr><th>#</th><th>Name</th><th>Team drawn</th><th>Entry fee</th><th>Status</th></tr></thead>
+    `<div class="twrap"><table class="manage-tbl">
+       <thead><tr><th>#</th><th>Name</th><th>Team drawn</th><th>Fee</th><th>Status</th></tr></thead>
        <tbody>`+
     state.participants.map((p,i)=>`<tr>
       <td class="rank">${i+1}</td>
