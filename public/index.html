@@ -86,15 +86,36 @@
     .upd  { font-size: 12px; color: var(--grey); font-weight: 500; }
 
     .twrap { overflow-x: auto; }
-    .tbl { width: 100%; border-collapse: collapse; font-size: 12px; }
-    .tbl th { text-align: left; padding: 7px 10px; color: var(--grey); font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em; background: var(--offwhite); border-bottom: 2px solid var(--grey-light); }
-    .tbl td { padding: 9px 10px; border-bottom: 1px solid var(--grey-light); color: var(--navy); vertical-align: middle; }
+    .tbl { width: 100%; border-collapse: collapse; font-size: 12px; table-layout: fixed; }
+    .tbl thead tr { background: var(--offwhite); }
+    .tbl th {
+      text-align: center; padding: 6px 3px; color: var(--grey);
+      font-family: 'Montserrat', sans-serif; font-weight: 700; font-size: 10px;
+      text-transform: uppercase; letter-spacing: 0.04em;
+      border-bottom: 2px solid var(--grey-light);
+      overflow: hidden; white-space: nowrap;
+    }
+    .tbl th:first-child  { text-align: left; padding-left: 8px; width: 24px; }
+    .tbl th:nth-child(2) { text-align: left; padding-left: 6px; }
+    .tbl th:nth-child(3), .tbl th:nth-child(4), .tbl th:nth-child(5),
+    .tbl th:nth-child(6), .tbl th:nth-child(7), .tbl th:nth-child(8),
+    .tbl th:nth-child(9), .tbl th:nth-child(10) { width: 26px; }
+    .tbl td {
+      text-align: center; padding: 8px 3px;
+      border-bottom: 1px solid var(--grey-light);
+      color: var(--navy); vertical-align: middle;
+      overflow: hidden; white-space: nowrap;
+    }
+    .tbl td:first-child  { text-align: left; padding-left: 8px; color: var(--grey); font-size: 11px; font-weight: 600; }
+    .tbl td:nth-child(2) { text-align: left; padding-left: 6px; }
+    .tbl td:last-child   { font-weight: 700; }
     .tbl tr:last-child td { border-bottom: none; }
     .tbl tr.q  td { border-left: 3px solid var(--gold); }
     .tbl tr.q3 td { border-left: 3px solid #00aeef; }
     .rank { color: var(--grey); font-size: 11px; font-weight: 600; }
-    .tname { display: flex; align-items: center; gap: 6px; }
-    .tflag { font-size: 15px; }
+    .tname { display: flex; align-items: center; gap: 5px; overflow: hidden; }
+    .tflag { font-size: 14px; flex-shrink: 0; }
+    .tteam { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
 
     .match-list { display: flex; flex-direction: column; gap: 8px; }
     .match-card { background: var(--white); border: 1px solid var(--grey-light); border-radius: 6px; padding: 11px 15px; display: flex; align-items: center; gap: 10px; }
@@ -641,9 +662,19 @@ async function fetchStandings(){
 function renderStandings(groups){
   document.getElementById("groups-grid").innerHTML=groups.map(g=>{
     const sorted=[...g.teams].sort((a,b)=>b.points-a.points||b.gd-a.gd||b.gf-a.gf).map((t,i)=>({...t,pos:i+1}));
-    return `<div class="group-card"><div class="group-title">${g.name}</div><table class="tbl"><thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead><tbody>`+
-    sorted.map(t=>`<tr class="${t.pos<=2?"q":t.pos===3?"q3":""}"><td class="rank">${t.pos}</td><td><div class="tname"><span class="tflag">${t.flag||""}</span>${t.team}</div></td><td>${t.played}</td><td>${t.won}</td><td>${t.drawn}</td><td>${t.lost}</td><td>${t.gf}</td><td>${t.ga}</td><td style="font-weight:600">${t.gd>0?"+":""}${t.gd}</td><td style="font-weight:700">${t.points}</td></tr>`).join("")+
-    `</tbody></table></div>`;
+    const rows=sorted.map(t=>`<tr class="${t.pos<=2?"q":t.pos===3?"q3":""}">
+      <td>${t.pos}</td>
+      <td><div class="tname"><span class="tflag">${t.flag||""}</span><span class="tteam">${t.team}</span></div></td>
+      <td>${t.played}</td><td>${t.won}</td><td>${t.drawn}</td><td>${t.lost}</td>
+      <td>${t.gf}</td><td>${t.ga}</td>
+      <td>${t.gd>0?"+":""}${t.gd}</td>
+      <td>${t.points}</td>
+    </tr>`).join("");
+    return `<div class="group-card"><div class="group-title">${g.name}</div>
+      <table class="tbl">
+        <thead><tr><th>#</th><th>Team</th><th>P</th><th>W</th><th>D</th><th>L</th><th>GF</th><th>GA</th><th>GD</th><th>Pts</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>`;
   }).join("");
 }
 
