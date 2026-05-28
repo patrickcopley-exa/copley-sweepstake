@@ -423,18 +423,35 @@ function setSyncStatus(status){ // 'ok' | 'syncing' | 'offline'
 /* ═══════════════════════════════════════════════
    SERVER STATE
 ═══════════════════════════════════════════════ */
+const BAKED_PARTICIPANTS = state.participants.slice(); // save baked-in entries
+
 async function loadState(){
   setSyncStatus("syncing");
   try {
     const r = await fetch('/api/state');
     if(!r.ok) throw new Error("Server error");
     const data = await r.json();
-    state = { ...state, ...data };
+    // Use server data only if it has MORE participants than baked-in
+    // This preserves baked entries when server is empty after redeploy
+    const serverParticipants = data.participants || [];
+    if(serverParticipants.length >= BAKED_PARTICIPANTS.length){
+      state = { ...state, ...data };
+    } else {
+      // Server is empty/behind — keep baked data, merge non-participant fields
+      const { participants: _, ...rest } = data;
+      state = { ...state, ...rest, participants: BAKED_PARTICIPANTS };
+      // Push baked data up to server so it's saved there too
+      fetch('/api/state', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(state)
+      }).catch(()=>{});
+    }
     setSyncStatus("ok");
     renderAll();
   } catch(e){
     setSyncStatus("offline");
     console.error("Could not load state:", e);
+    renderAll(); // still render with baked data
   }
 }
 
