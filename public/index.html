@@ -513,7 +513,7 @@ async function addParticipant(pot){
         const data = await r.json();
         if(!r.ok || !data.ok){
           reveal.classList.remove("show");
-          drawBtn.disabled = false;
+          drawBtn1.disabled = false; drawBtn2.disabled = false;
           alert(data.error || "Could not save draw — please try again.");
           setSyncStatus("offline");
           return;
