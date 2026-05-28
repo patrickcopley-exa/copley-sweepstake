@@ -335,11 +335,11 @@
             <div class="pot-buttons">
               <button class="pot-btn pot-btn-1" id="draw-btn-1" onclick="addParticipant(1)">
                 <span><i class="ti ti-arrows-shuffle"></i> Draw Pot 1 — £2</span>
-                <span class="pot-btn-sub">Top 24 ranked teams</span>
+                <span class="pot-btn-sub">Top 24 · <span id="pot1-count">24</span> teams left</span>
               </button>
               <button class="pot-btn pot-btn-2" id="draw-btn-2" onclick="addParticipant(2)">
                 <span><i class="ti ti-arrows-shuffle"></i> Draw Pot 2 — £2</span>
-                <span class="pot-btn-sub">Bottom 24 ranked teams</span>
+                <span class="pot-btn-sub">Bottom 24 · <span id="pot2-count">24</span> teams left</span>
               </button>
             </div>
           </div>
@@ -458,7 +458,7 @@ function switchTab(name){
   if(name==="sweepstake") renderSweepstake();
   if(name==="standings")  renderStandings(liveGroups);
   if(name==="knockout")   buildBracket();
-  if(name==="manage")     { loadState(); }
+  if(name==="manage")     loadState();
 }
 
 function tf(n){ if(!n) return ""; const t=ALL_TEAMS.find(t=>t.team===n); return t?t.flag+" ":""; }
@@ -518,7 +518,16 @@ async function addParticipant(pot){
           setSyncStatus("offline");
           return;
         }
-        state = { ...state, ...data.state };
+        // Safely merge returned state
+        if(data.state && data.state.participants) {
+          state = { ...state, ...data.state };
+        } else {
+          // Server saved OK but returned partial data — add locally too
+          if(!state.participants) state.participants = [];
+          if(!state.participants.find(p=>p.team===picked.team)){
+            state.participants.push({name:n, team:picked.team});
+          }
+        }
         setSyncStatus("ok");
 
         document.getElementById("draw-flag").textContent = picked.flag;
@@ -532,8 +541,17 @@ async function addParticipant(pot){
       } catch(e){
         reveal.classList.remove("show");
         drawBtn1.disabled = false; drawBtn2.disabled = false;
-        setSyncStatus("offline");
-        alert("Network error — could not save draw. Please try again.");
+        // Reload state in case the save actually worked
+        await loadState();
+        // Only show error if participant still not in list
+        const saved = state.participants && state.participants.find(p=>p.team===picked.team);
+        if(!saved){
+          setSyncStatus("offline");
+          alert("Network error — could not save draw. Please try again.");
+        } else {
+          setSyncStatus("ok");
+          renderManage(); renderPotBar(); renderPrizes();
+        }
       }
     }
   }, 80);
@@ -628,8 +646,19 @@ function renderAll(){ renderSweepstake(); renderManage(); }
 ═══════════════════════════════════════════════ */
 function renderManage(){
   const el=document.getElementById("manage-list");
-  const avail=getAvailableTeams();
+  const avail1=getAvailableTeams(1);
+  const avail2=getAvailableTeams(2);
+  const avail=[...avail1,...avail2];
   const count=state.participants.length;
+  // Update pot counters on draw buttons
+  const p1el=document.getElementById("pot1-count");
+  const p2el=document.getElementById("pot2-count");
+  if(p1el) p1el.textContent=avail1.length;
+  if(p2el) p2el.textContent=avail2.length;
+  const db1=document.getElementById("draw-btn-1");
+  const db2=document.getElementById("draw-btn-2");
+  if(db1) db1.disabled=avail1.length===0;
+  if(db2) db2.disabled=avail2.length===0;
   if(!count){
     el.innerHTML=`<div class="empty">No participants yet. Enter a name above and click <strong>Draw — £2</strong>.</div>`;
     return;
