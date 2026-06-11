@@ -145,19 +145,38 @@ async function footballDataFetch(path) {
 // GET /api/scores — live and recent World Cup matches
 app.get('/api/scores', async (req, res) => {
   try {
-    const data = await footballDataFetch('/competitions/WC/matches?status=LIVE,IN_PLAY,PAUSED,FINISHED,SCHEDULED&limit=40');
-    const matches = (data.matches || []).map(m => ({
+    // Fetch all WC matches — no status filter (football-data doesn't support comma-separated statuses)
+    const data = await footballDataFetch('/competitions/WC/matches');
+    const allMatches = data.matches || [];
+
+    // Sort: live first, then most recent finished, then upcoming
+    const statusOrder = { 'IN_PLAY':0, 'PAUSED':1, 'FINISHED':2, 'TIMED':3, 'SCHEDULED':3 };
+    allMatches.sort((a,b) => {
+      const ao = statusOrder[a.status] ?? 9;
+      const bo = statusOrder[b.status] ?? 9;
+      if(ao !== bo) return ao - bo;
+      return new Date(b.utcDate) - new Date(a.utcDate);
+    });
+
+    // Return the most relevant 30 matches
+    const matches = allMatches.slice(0, 30).map(m => ({
       homeTeam: m.homeTeam.shortName || m.homeTeam.name,
       awayTeam: m.awayTeam.shortName || m.awayTeam.name,
-      homeScore: m.score.fullTime.home,
-      awayScore: m.score.fullTime.away,
+      homeScore: m.score.fullTime.home !== null ? m.score.fullTime.home
+               : m.score.halfTime.home !== null ? m.score.halfTime.home
+               : null,
+      awayScore: m.score.fullTime.away !== null ? m.score.fullTime.away
+               : m.score.halfTime.away !== null ? m.score.halfTime.away
+               : null,
       status: m.status === 'FINISHED' ? 'FT'
-             : m.status === 'IN_PLAY' ? 'LIVE'
-             : m.status === 'PAUSED'  ? 'HT'
-             : 'upcoming',
+            : m.status === 'IN_PLAY'  ? 'LIVE'
+            : m.status === 'PAUSED'   ? 'HT'
+            : 'upcoming',
       minute: m.minute || null,
-      stage: m.group ? m.group.replace('GROUP_','Group ') : (m.stage || 'Knockout')
+      stage: m.group ? m.group.replace('GROUP_', 'Group ') : (m.stage ? m.stage.replace(/_/g,' ') : 'Knockout'),
+      utcDate: m.utcDate
     }));
+
     res.json({ ok: true, matches });
   } catch(err) {
     console.error('Scores error:', err.message);
