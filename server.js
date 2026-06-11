@@ -145,33 +145,42 @@ async function footballDataFetch(path) {
 // GET /api/scores — live and recent World Cup matches
 app.get('/api/scores', async (req, res) => {
   try {
-    // Fetch all WC matches — no status filter (football-data doesn't support comma-separated statuses)
-    const data = await footballDataFetch('/competitions/WC/matches');
-    const allMatches = data.matches || [];
+    // Use openfootball/worldcup.json — free, no API key, real WC2026 data
+    const r = await fetch('https://raw.githubusercontent.com/openfootball/worldcup.json/master/2026/worldcup.json');
+    if (!r.ok) throw new Error('Could not fetch match data');
+    const data = await r.json();
 
-    // Sort: live first, then most recent finished, then upcoming
-    const statusOrder = { 'IN_PLAY':0, 'PAUSED':1, 'FINISHED':2, 'TIMED':3, 'SCHEDULED':3 };
-    allMatches.sort((a,b) => {
-      const ao = statusOrder[a.status] ?? 9;
-      const bo = statusOrder[b.status] ?? 9;
-      if(ao !== bo) return ao - bo;
-      return new Date(b.utcDate) - new Date(a.utcDate);
+    const today = new Date();
+    const allMatches = (data.matches || []).map(m => {
+      // Parse match date
+      const matchDate = m.date ? new Date(m.date) : null;
+      const hasScore = m.score1 !== null && m.score1 !== undefined;
+      const isToday = matchDate && matchDate.toDateString() === today.toDateString();
+
+      return {
+        homeTeam: m.team1,
+        awayTeam: m.team2,
+        homeScore: hasScore ? m.score1 : null,
+        awayScore: hasScore ? m.score2 : null,
+        status: hasScore ? 'FT' : isToday ? 'upcoming' : matchDate < today ? 'FT' : 'upcoming',
+        minute: null,
+        stage: m.group || m.round || 'Match',
+        date: m.date
+      };
     });
 
-    // Return the most relevant 30 matches
-    const matches = allMatches.slice(0, 30).map(m => ({
-      homeTeam: m.homeTeam.shortName || m.homeTeam.name,
-      awayTeam: m.awayTeam.shortName || m.awayTeam.name,
-      homeScore: m.score.fullTime.home,
-      awayScore: m.score.fullTime.away,
-      status: m.status === 'FINISHED' ? 'FT'
-            : m.status === 'IN_PLAY'  ? 'LIVE'
-            : m.status === 'PAUSED'   ? 'HT'
-            : 'upcoming',
-      minute: m.minute || null,
-      stage: m.group ? m.group.replace('GROUP_', 'Group ') : (m.stage ? m.stage.replace(/_/g,' ') : 'Knockout'),
-      utcDate: m.utcDate
-    }));
+    // Show: finished matches from last 4 days + today's matches + next 4 days upcoming
+    const fourDaysAgo = new Date(today - 4 * 86400000);
+    const fourDaysAhead = new Date(today.getTime() + 4 * 86400000);
+
+    const relevant = allMatches.filter(m => {
+      if (!m.date) return true;
+      const d = new Date(m.date);
+      return d >= fourDaysAgo && d <= fourDaysAhead;
+    });
+
+    // If nothing in window, show most recent 20
+    const matches = relevant.length > 0 ? relevant : allMatches.slice(-20);
 
     res.json({ ok: true, matches });
   } catch(err) {
