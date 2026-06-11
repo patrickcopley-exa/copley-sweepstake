@@ -162,12 +162,8 @@ app.get('/api/scores', async (req, res) => {
     const matches = allMatches.slice(0, 30).map(m => ({
       homeTeam: m.homeTeam.shortName || m.homeTeam.name,
       awayTeam: m.awayTeam.shortName || m.awayTeam.name,
-      homeScore: m.score.fullTime.home !== null ? m.score.fullTime.home
-               : m.score.halfTime.home !== null ? m.score.halfTime.home
-               : null,
-      awayScore: m.score.fullTime.away !== null ? m.score.fullTime.away
-               : m.score.halfTime.away !== null ? m.score.halfTime.away
-               : null,
+      homeScore: m.score.fullTime.home,
+      awayScore: m.score.fullTime.away,
       status: m.status === 'FINISHED' ? 'FT'
             : m.status === 'IN_PLAY'  ? 'LIVE'
             : m.status === 'PAUSED'   ? 'HT'
