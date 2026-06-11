@@ -148,6 +148,13 @@ app.post('/api/claude', async (req, res) => {
       return res.status(400).json({ error: 'Invalid request type.' });
     }
 
+    const payload = {
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 2000,
+      system: 'You are a World Cup 2026 data assistant. Today is ' + new Date().toISOString().split('T')[0] + '. Return ONLY valid JSON — no markdown, no backticks, no extra text.',
+      messages: [{ role: 'user', content: PROMPT_TEMPLATES[type] }]
+    };
+
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -155,22 +162,28 @@ app.post('/api/claude', async (req, res) => {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5',
-        max_tokens: 2000,
-        system: 'You are a World Cup 2026 data assistant. Today is ' + new Date().toISOString().split('T')[0] + '. Return ONLY valid JSON — no markdown, no backticks, no extra text.',
-        messages: [{ role: 'user', content: PROMPT_TEMPLATES[type] }]
-      })
+      body: JSON.stringify(payload)
     });
-    const text = await response.text();
-    try {
-      const data = JSON.parse(text);
-      res.json(data);
-    } catch(e) {
-      console.error('Anthropic response not JSON:', text.slice(0, 200));
-      res.status(500).json({ error: 'Anthropic API returned unexpected response: ' + text.slice(0, 100) });
+
+    const responseText = await response.text();
+    console.log('Anthropic status:', response.status);
+    console.log('Anthropic response:', responseText.slice(0, 300));
+
+    if (!response.ok) {
+      return res.status(500).json({ error: 'Anthropic API error: ' + responseText.slice(0, 200) });
     }
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch(e) {
+      console.error('JSON parse error:', responseText.slice(0, 200));
+      return res.status(500).json({ error: 'Invalid JSON from Anthropic: ' + responseText.slice(0, 100) });
+    }
+
+    res.json(data);
   } catch(err) {
+    console.error('Claude route error:', err.message);
     res.status(500).json({ error: err.message });
   }
 });
