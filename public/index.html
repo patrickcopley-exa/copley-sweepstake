@@ -710,8 +710,8 @@ function renderManage(){
 /* ═══════════════════════════════════════════════
    API — SCORES / STANDINGS / STATS
 ═══════════════════════════════════════════════ */
-async function callClaude(prompt){
-  const r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:2000,system:"You are a World Cup 2026 data assistant. Today is "+new Date().toISOString().split("T")[0]+". Return ONLY valid JSON — no markdown, no backticks.",messages:[{role:"user",content:prompt}]})});
+async function callClaude(type){
+  const r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type})});
   const d=await r.json();if(d.error)throw new Error(d.error);
   const txt=d.content?.filter(c=>c.type==="text").map(c=>c.text).join("")||"";
   return JSON.parse(txt.replace(/```json[\s\S]*?```|```/g,"").trim());
@@ -720,7 +720,7 @@ async function callClaude(prompt){
 async function fetchScores(){
   const c=document.getElementById("scores-container"),u=document.getElementById("upd-scores");
   c.innerHTML='<p style="color:var(--grey);font-size:13px;padding:16px 0">Fetching…</p>';
-  try{const d=await callClaude(`Return recent and upcoming World Cup 2026 match results. JSON exactly:\n{"matches":[{"homeTeam":"Name","awayTeam":"Name","homeScore":2,"awayScore":1,"status":"FT or LIVE or HT or upcoming","minute":"78","stage":"Group A"}]}`);u.textContent="Updated "+new Date().toLocaleTimeString();renderScores(d.matches||[]);}
+  try{const d=await callClaude("scores");u.textContent="Updated "+new Date().toLocaleTimeString();renderScores(d.matches||[]);}
   catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load: ${e.message}</div>`;u.textContent="Failed";}
 }
 function renderScores(matches){
@@ -732,7 +732,7 @@ function renderScores(matches){
 
 async function fetchStandings(){
   const u=document.getElementById("upd-standings");u.textContent="Fetching…";
-  try{const d=await callClaude(`Return current FIFA World Cup 2026 group standings. All 12 groups A–L. JSON exactly:\n{"groups":[{"name":"Group A","teams":[{"pos":1,"team":"Mexico","flag":"🇲🇽","played":3,"won":2,"drawn":1,"lost":0,"gf":5,"ga":2,"gd":3,"points":7}]}]}`);
+  try{const d=await callClaude("standings");
     if(d.groups?.length){liveGroups=d.groups.map(g=>{const og=OFFICIAL_GROUPS.find(o=>o.name===g.name);return{name:g.name,teams:g.teams.map(t=>({...t,flag:og?.teams.find(ot=>ot.team===t.team)?.flag||t.flag||""}))}; });renderStandings(liveGroups);buildBracket();u.textContent="Live — "+new Date().toLocaleTimeString();}
   }catch(e){u.textContent="Failed — showing official draw";}
 }
@@ -758,7 +758,7 @@ function renderStandings(groups){
 async function fetchStats(){
   const c=document.getElementById("stats-container"),u=document.getElementById("upd-stats");
   c.innerHTML='<p style="color:var(--grey);font-size:13px;padding:16px 0">Loading…</p>';
-  try{const d=await callClaude(`Return current World Cup 2026 tournament statistics. JSON exactly:\n{"totalGoals":47,"totalMatches":18,"avgGoalsPerMatch":2.6,"totalRedCards":3,"firstRedCard":{"player":"Name","team":"Team","match":"A vs B","minute":34},"goalsByTeam":[{"team":"Name","scored":8,"conceded":3}]}`);
+  try{const d=await callClaude("stats");
     if(d.firstRedCard?.player&&!state.firstRedCard){state.firstRedCard=d.firstRedCard.player+" ("+d.firstRedCard.team+")";await saveState({firstRedCard:state.firstRedCard});}
     if(d.goalsByTeam?.length){const ts=[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored)[0];const tc=[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded)[0];let changed={};if(!state.topScorerTeam){state.topScorerTeam=ts.team;changed.topScorerTeam=ts.team;}if(!state.mostConcededTeam){state.mostConcededTeam=tc.team;changed.mostConcededTeam=tc.team;}if(Object.keys(changed).length)await saveState(changed);}
     u.textContent="Updated "+new Date().toLocaleTimeString();renderStats(d);renderPrizes();}
