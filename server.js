@@ -156,14 +156,20 @@ app.post('/api/claude', async (req, res) => {
         'anthropic-version': '2023-06-01'
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model: 'claude-haiku-4-5',
         max_tokens: 2000,
         system: 'You are a World Cup 2026 data assistant. Today is ' + new Date().toISOString().split('T')[0] + '. Return ONLY valid JSON — no markdown, no backticks, no extra text.',
         messages: [{ role: 'user', content: PROMPT_TEMPLATES[type] }]
       })
     });
-    const data = await response.json();
-    res.json(data);
+    const text = await response.text();
+    try {
+      const data = JSON.parse(text);
+      res.json(data);
+    } catch(e) {
+      console.error('Anthropic response not JSON:', text.slice(0, 200));
+      res.status(500).json({ error: 'Anthropic API returned unexpected response: ' + text.slice(0, 100) });
+    }
   } catch(err) {
     res.status(500).json({ error: err.message });
   }
