@@ -712,7 +712,11 @@ function renderManage(){
 ═══════════════════════════════════════════════ */
 async function callClaude(type){
   const r=await fetch('/api/claude',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({type})});
-  const d=await r.json();if(d.error)throw new Error(d.error);
+  const d=await r.json();
+  if(d.error) throw new Error(d.error);
+  // New server returns {ok:true, data:{...}} with JSON already parsed
+  if(d.ok && d.data) return d.data;
+  // Fallback: old format with raw Anthropic response
   const txt=d.content?.filter(c=>c.type==="text").map(c=>c.text).join("")||"";
   return JSON.parse(txt.replace(/```json[\s\S]*?```|```/g,"").trim());
 }
