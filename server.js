@@ -181,6 +181,19 @@ app.post('/api/claude', async (req, res) => {
       return res.status(500).json({ error: 'Invalid JSON from Anthropic: ' + responseText.slice(0, 100) });
     }
 
+    // Strip markdown code fences from the response text server-side
+    // so browser always gets clean JSON even if model wraps in backticks
+    if (data.content && data.content[0] && data.content[0].text) {
+      const raw = data.content[0].text;
+      const cleaned = raw.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
+      try {
+        const parsed = JSON.parse(cleaned);
+        return res.json({ ok: true, data: parsed });
+      } catch(e) {
+        console.error('Could not parse model output as JSON:', cleaned.slice(0,200));
+        return res.status(500).json({ error: 'Model did not return valid JSON' });
+      }
+    }
     res.json(data);
   } catch(err) {
     console.error('Claude route error:', err.message);
