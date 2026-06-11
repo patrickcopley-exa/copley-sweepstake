@@ -127,16 +127,78 @@ app.post('/api/draw', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Anthropic API proxy — locked server-side
-// Browser only sends a 'type', cannot change model or prompt
+// ─────────────────────────────────────────────────────────────
+// Football-Data.org — real live scores and standings
+// Sign up free at football-data.org, add FOOTBALL_API_KEY to Railway
 // ─────────────────────────────────────────────────────────────
 
-const ALLOWED_TYPES = ['scores', 'standings', 'stats'];
-const PROMPT_TEMPLATES = {
-  scores:    `Return recent and upcoming World Cup 2026 match results. JSON exactly:\n{"matches":[{"homeTeam":"Name","awayTeam":"Name","homeScore":2,"awayScore":1,"status":"FT or LIVE or HT or upcoming","minute":"78","stage":"Group A"}]}`,
-  standings: `Return complete current group stage standings for FIFA World Cup 2026. All 12 groups A-L, 4 teams each. JSON exactly:\n{"groups":[{"name":"Group A","teams":[{"pos":1,"team":"Name","flag":"🏴","played":3,"won":2,"drawn":1,"lost":0,"gf":5,"ga":2,"gd":3,"points":7}]}]}`,
-  stats:     `Return current World Cup 2026 tournament statistics. JSON exactly:\n{"totalGoals":47,"totalMatches":18,"avgGoalsPerMatch":2.6,"totalRedCards":3,"firstRedCard":{"player":"Name","team":"Team","match":"A vs B","minute":34},"goalsByTeam":[{"team":"Name","scored":8,"conceded":3}]}`
-};
+const FDORG_BASE = 'https://api.football-data.org/v4';
+
+async function footballDataFetch(path) {
+  const apiKey = process.env.FOOTBALL_API_KEY;
+  const headers = apiKey ? { 'X-Auth-Token': apiKey } : {};
+  const r = await fetch(`${FDORG_BASE}${path}`, { headers });
+  if (!r.ok) throw new Error(`football-data.org ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+// GET /api/scores — live and recent World Cup matches
+app.get('/api/scores', async (req, res) => {
+  try {
+    const data = await footballDataFetch('/competitions/WC/matches?status=LIVE,IN_PLAY,PAUSED,FINISHED,SCHEDULED&limit=40');
+    const matches = (data.matches || []).map(m => ({
+      homeTeam: m.homeTeam.shortName || m.homeTeam.name,
+      awayTeam: m.awayTeam.shortName || m.awayTeam.name,
+      homeScore: m.score.fullTime.home,
+      awayScore: m.score.fullTime.away,
+      status: m.status === 'FINISHED' ? 'FT'
+             : m.status === 'IN_PLAY' ? 'LIVE'
+             : m.status === 'PAUSED'  ? 'HT'
+             : 'upcoming',
+      minute: m.minute || null,
+      stage: m.group ? m.group.replace('GROUP_','Group ') : (m.stage || 'Knockout')
+    }));
+    res.json({ ok: true, matches });
+  } catch(err) {
+    console.error('Scores error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/standings — all group tables
+app.get('/api/standings', async (req, res) => {
+  try {
+    const data = await footballDataFetch('/competitions/WC/standings');
+    const groups = (data.standings || []).map(g => ({
+      name: g.group ? g.group.replace('GROUP_','Group ') : 'Group',
+      teams: (g.table || []).map(row => ({
+        pos:    row.position,
+        team:   row.team.shortName || row.team.name,
+        flag:   '',
+        played: row.playedGames,
+        won:    row.won,
+        drawn:  row.draw,
+        lost:   row.lost,
+        gf:     row.goalsFor,
+        ga:     row.goalsAgainst,
+        gd:     row.goalDifference,
+        points: row.points
+      }))
+    }));
+    res.json({ ok: true, groups });
+  } catch(err) {
+    console.error('Standings error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────
+// Anthropic API proxy — Claude used only for stats summary
+// Model and prompt locked server-side
+// ─────────────────────────────────────────────────────────────
+
+const STATS_PROMPT = `Return current World Cup 2026 tournament statistics. JSON exactly:
+{"totalGoals":47,"totalMatches":18,"avgGoalsPerMatch":2.6,"totalRedCards":3,"firstRedCard":{"player":"Name","team":"Team","match":"A vs B","minute":34},"goalsByTeam":[{"team":"Name","scored":8,"conceded":3}]}`;
 
 app.post('/api/claude', async (req, res) => {
   try {
@@ -144,16 +206,9 @@ app.post('/api/claude', async (req, res) => {
     if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in Railway Variables.' });
 
     const { type } = req.body;
-    if (!type || !ALLOWED_TYPES.includes(type)) {
+    if (type !== 'stats') {
       return res.status(400).json({ error: 'Invalid request type.' });
     }
-
-    const payload = {
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2000,
-      system: 'You are a World Cup 2026 data assistant. Today is ' + new Date().toISOString().split('T')[0] + '. Return ONLY valid JSON — no markdown, no backticks, no extra text.',
-      messages: [{ role: 'user', content: PROMPT_TEMPLATES[type] }]
-    };
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -162,35 +217,32 @@ app.post('/api/claude', async (req, res) => {
         'x-api-key': apiKey,
         'anthropic-version': '2023-06-01'
       },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 2000,
+        system: 'You are a World Cup 2026 data assistant. Today is ' + new Date().toISOString().split('T')[0] + '. Return ONLY valid JSON — no markdown, no backticks, no extra text.',
+        messages: [{ role: 'user', content: STATS_PROMPT }]
+      })
     });
 
     const responseText = await response.text();
     console.log('Anthropic status:', response.status);
-    console.log('Anthropic response:', responseText.slice(0, 300));
 
     if (!response.ok) {
       return res.status(500).json({ error: 'Anthropic API error: ' + responseText.slice(0, 200) });
     }
 
     let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch(e) {
-      console.error('JSON parse error:', responseText.slice(0, 200));
-      return res.status(500).json({ error: 'Invalid JSON from Anthropic: ' + responseText.slice(0, 100) });
+    try { data = JSON.parse(responseText); } catch(e) {
+      return res.status(500).json({ error: 'Invalid JSON from Anthropic' });
     }
 
-    // Strip markdown code fences from the response text server-side
-    // so browser always gets clean JSON even if model wraps in backticks
     if (data.content && data.content[0] && data.content[0].text) {
       const raw = data.content[0].text;
       const cleaned = raw.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
       try {
-        const parsed = JSON.parse(cleaned);
-        return res.json({ ok: true, data: parsed });
+        return res.json({ ok: true, data: JSON.parse(cleaned) });
       } catch(e) {
-        console.error('Could not parse model output as JSON:', cleaned.slice(0,200));
         return res.status(500).json({ error: 'Model did not return valid JSON' });
       }
     }
@@ -200,6 +252,7 @@ app.post('/api/claude', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
