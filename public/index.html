@@ -723,9 +723,14 @@ async function callClaude(type){
 
 async function fetchScores(){
   const c=document.getElementById("scores-container"),u=document.getElementById("upd-scores");
-  c.innerHTML='<p style="color:var(--grey);font-size:13px;padding:16px 0">Fetching…</p>';
-  try{const d=await callClaude("scores");u.textContent="Updated "+new Date().toLocaleTimeString();renderScores(d.matches||[]);}
-  catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load: ${e.message}</div>`;u.textContent="Failed";}
+  c.innerHTML='<p style="color:var(--grey);font-size:13px;padding:16px 0">Fetching live scores…</p>';
+  try{
+    const r=await fetch('/api/scores');
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'Failed');
+    u.textContent="Updated "+new Date().toLocaleTimeString();
+    renderScores(d.matches||[]);
+  }catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load scores: ${e.message}</div>`;u.textContent="Failed";}
 }
 function renderScores(matches){
   const c=document.getElementById("scores-container");if(!matches.length){c.innerHTML='<div class="empty">No data yet.</div>';return;}
@@ -735,10 +740,26 @@ function renderScores(matches){
 }
 
 async function fetchStandings(){
-  const u=document.getElementById("upd-standings");u.textContent="Fetching…";
-  try{const d=await callClaude("standings");
-    if(d.groups?.length){liveGroups=d.groups.map(g=>{const og=OFFICIAL_GROUPS.find(o=>o.name===g.name);return{name:g.name,teams:g.teams.map(t=>({...t,flag:og?.teams.find(ot=>ot.team===t.team)?.flag||t.flag||""}))}; });renderStandings(liveGroups);buildBracket();u.textContent="Live — "+new Date().toLocaleTimeString();}
-  }catch(e){u.textContent="Failed — showing official draw";}
+  const u=document.getElementById("upd-standings");
+  u.textContent="Fetching live standings…";
+  try{
+    const r=await fetch('/api/standings');
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'Failed');
+    if(d.groups?.length){
+      // Merge flags from OFFICIAL_GROUPS since football-data doesn't provide them
+      liveGroups=d.groups.map(g=>{
+        const og=OFFICIAL_GROUPS.find(o=>o.name===g.name);
+        return{name:g.name,teams:g.teams.map(t=>({
+          ...t,
+          flag:og?.teams.find(ot=>ot.team===t.team||t.team.includes(ot.team.split(' ')[0]))?.flag||''
+        }))};
+      });
+      renderStandings(liveGroups);
+      buildBracket();
+      u.textContent="Live — "+new Date().toLocaleTimeString();
+    }
+  }catch(e){u.textContent="Could not load — showing official draw"; console.error(e);}
 }
 function renderStandings(groups){
   document.getElementById("groups-grid").innerHTML=groups.map(g=>{
