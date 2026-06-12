@@ -359,6 +359,15 @@
             <button class="btn sm navy" onclick="loadState()"><i class="ti ti-refresh"></i> Refresh list</button>
           </div>
           <div id="manage-list"></div>
+
+          <div class="slabel" style="margin-top:20px">First red card — £6 prize</div>
+          <p style="font-size:12px;color:var(--grey);margin-bottom:10px">Red card data isn't available automatically — enter the player and team manually when a red card is shown.</p>
+          <div style="display:flex;gap:8px;max-width:480px;margin-bottom:6px;flex-wrap:wrap;">
+            <input id="rc-player" class="inp" type="text" placeholder="Player name" style="flex:2;min-width:140px" />
+            <input id="rc-team"   class="inp" type="text" placeholder="Team" style="flex:2;min-width:120px" />
+            <button class="btn" onclick="saveRedCard()" style="white-space:nowrap"><i class="ti ti-cards"></i> Save red card</button>
+          </div>
+          <div id="rc-status" style="font-size:12px;color:var(--grey);margin-top:4px"></div>
         </div>
 
       </main>
@@ -670,6 +679,25 @@ function renderAll(){ renderSweepstake(); renderManage(); }
 /* ═══════════════════════════════════════════════
    MANAGE — no remove, locked in
 ═══════════════════════════════════════════════ */
+async function saveRedCard(){
+  const player = document.getElementById("rc-player").value.trim();
+  const team   = document.getElementById("rc-team").value.trim();
+  const status = document.getElementById("rc-status");
+  if(!player||!team){ status.textContent="Enter both player name and team."; return; }
+  state.firstRedCard = `${player} (${team})`;
+  try {
+    await saveState({ firstRedCard: state.firstRedCard });
+    document.getElementById("rc-player").value="";
+    document.getElementById("rc-team").value="";
+    status.style.color="var(--gold-dark)";
+    status.textContent=`✓ Saved — ${player} (${team}) — £6 prize recorded`;
+    renderPrizes();
+  } catch(e) {
+    status.style.color="var(--red)";
+    status.textContent="Could not save — please try again.";
+  }
+}
+
 function renderManage(){
   const el=document.getElementById("manage-list");
   const avail1=getAvailableTeams(1);
@@ -795,24 +823,33 @@ async function fetchStats(){
     if(d.goalsByTeam?.length){
       const ts=[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored)[0];
       const tc=[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded)[0];
+      // Always update from real data — standings change as tournament progresses
       let ch={};
-      if(!state.topScorerTeam&&ts){state.topScorerTeam=ts.team;ch.topScorerTeam=ts.team;}
-      if(!state.mostConcededTeam&&tc){state.mostConcededTeam=tc.team;ch.mostConcededTeam=tc.team;}
+      if(ts && state.topScorerTeam!==ts.team){state.topScorerTeam=ts.team;ch.topScorerTeam=ts.team;}
+      if(tc && state.mostConcededTeam!==tc.team){state.mostConcededTeam=tc.team;ch.mostConcededTeam=tc.team;}
       if(Object.keys(ch).length) await saveState(ch);
     }
     u.textContent="Updated "+new Date().toLocaleTimeString();
     renderStats(d);
+    renderPotBar();
     renderPrizes();
+    renderPodium();
+    renderParticipants();
   }catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load stats: ${e.message}</div>`;u.textContent="Failed";}
 }
 function renderStats(d){
   const c=document.getElementById("stats-container");
   let h=`<div class="stat-grid">`;
-  [{l:"Total goals",v:d.totalGoals,accent:true},{l:"Matches played",v:d.totalMatches},{l:"Avg goals/game",v:d.avgGoalsPerMatch?Number(d.avgGoalsPerMatch).toFixed(1):"-"},{l:"Red cards",v:d.totalRedCards,red:true}].forEach(s=>{
-    h+=`<div class="stat-card" style="border-top:3px solid ${s.red?"var(--red)":s.accent?"var(--gold)":"var(--grey-light)"}"><div class="stat-label">${s.l}</div><div class="stat-value" style="${s.red?"color:var(--red)":""}">${s.v??"-"}</div></div>`;
+  [{l:"Total goals",v:d.totalGoals,accent:true},{l:"Matches played",v:d.totalMatches},{l:"Avg goals/game",v:d.avgGoalsPerMatch?Number(d.avgGoalsPerMatch).toFixed(1):"-"}].forEach(s=>{
+    h+=`<div class="stat-card" style="border-top:3px solid ${s.accent?"var(--gold)":"var(--grey-light)"}"><div class="stat-label">${s.l}</div><div class="stat-value">${s.v??"-"}</div></div>`;
   });
   h+=`</div>`;
-  if(d.firstRedCard?.player) h+=`<div class="alert-rc"><span style="font-size:20px">🟥</span><div><strong>First red card:</strong> ${d.firstRedCard.player} — ${d.firstRedCard.team}, ${d.firstRedCard.match??"?"} (min ${d.firstRedCard.minute??"?"})</div></div>`;
+  // Red card prize — must be entered manually in Manage as booking data isn't on free API tier
+  if(state.firstRedCard){
+    h+=`<div class="alert-rc"><span style="font-size:20px">🟥</span><div><strong>First red card prize (£6):</strong> ${state.firstRedCard}</div></div>`;
+  } else {
+    h+=`<div style="background:var(--offwhite);border:1px solid var(--grey-light);border-radius:6px;padding:10px 14px;font-size:12px;color:var(--grey);margin-bottom:12px;display:flex;align-items:center;gap:8px;"><span>🟥</span><div><strong>First red card — £6 prize:</strong> Not yet awarded. Enter the winner manually in the <strong>Manage</strong> tab once a red card is shown.</div></div>`;
+  }
   if(d.totalMatches===0){h+='<div class="empty">No matches played yet — stats will appear once the tournament begins.</div>';c.innerHTML=h;return;}
   h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">`;
   // Top scorers
