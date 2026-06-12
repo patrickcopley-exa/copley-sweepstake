@@ -258,63 +258,98 @@ app.get('/api/standings', async (req, res) => {
 });
 
 // ─────────────────────────────────────────────────────────────
-// Anthropic API proxy — Claude used only for stats summary
-// Model and prompt locked server-side
+// Stats — real data from football-data.org
 // ─────────────────────────────────────────────────────────────
 
-const STATS_PROMPT = `Return current World Cup 2026 tournament statistics. JSON exactly:
-{"totalGoals":47,"totalMatches":18,"avgGoalsPerMatch":2.6,"totalRedCards":3,"firstRedCard":{"player":"Name","team":"Team","match":"A vs B","minute":34},"goalsByTeam":[{"team":"Name","scored":8,"conceded":3}]}`;
-
-app.post('/api/claude', async (req, res) => {
+app.get('/api/stats', async (req, res) => {
   try {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return res.status(500).json({ error: 'ANTHROPIC_API_KEY not set in Railway Variables.' });
+    const apiKey = process.env.FOOTBALL_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'FOOTBALL_API_KEY not set in Railway Variables.' });
 
-    const { type } = req.body;
-    if (type !== 'stats') {
-      return res.status(400).json({ error: 'Invalid request type.' });
+    // Fetch all matches and scorers in parallel
+    const [matchesRes, scorersRes] = await Promise.all([
+      fetch('https://api.football-data.org/v4/competitions/WC/matches', { headers: { 'X-Auth-Token': apiKey } }),
+      fetch('https://api.football-data.org/v4/competitions/WC/scorers?limit=20', { headers: { 'X-Auth-Token': apiKey } })
+    ]);
+
+    if (!matchesRes.ok) {
+      const txt = await matchesRes.text();
+      return res.status(500).json({ ok: false, error: `football-data.org ${matchesRes.status}: ${txt.slice(0,100)}` });
     }
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01'
-      },
-      body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 2000,
-        system: 'You are a World Cup 2026 data assistant. Today is ' + new Date().toISOString().split('T')[0] + '. Return ONLY valid JSON — no markdown, no backticks, no extra text.',
-        messages: [{ role: 'user', content: STATS_PROMPT }]
-      })
+    const matchData = await matchesRes.json();
+    const scorerData = scorersRes.ok ? await scorersRes.json() : { scorers: [] };
+
+    const finished = (matchData.matches || []).filter(m => m.status === 'FINISHED');
+    const totalMatches = finished.length;
+
+    // Tally goals and cards per team
+    let totalGoals = 0;
+    let totalRedCards = 0;
+    let firstRedCard = null;
+    const teamStats = {};
+
+    const NAME_MAP = {
+      'Korea Republic': 'South Korea', 'Czechia': 'Czech Republic',
+      'Bosnia and Herzegovina': 'Bosnia & Herz.', "Côte d'Ivoire": 'Ivory Coast',
+      'Turkey': 'Türkiye', 'Curacao': 'Curaçao',
+    };
+    const nn = n => NAME_MAP[n] || n;
+
+    finished.forEach(m => {
+      const ht = nn(m.homeTeam.shortName || m.homeTeam.name);
+      const at = nn(m.awayTeam.shortName || m.awayTeam.name);
+      const hg = m.score.fullTime.home || 0;
+      const ag = m.score.fullTime.away || 0;
+      totalGoals += hg + ag;
+
+      if (!teamStats[ht]) teamStats[ht] = { scored: 0, conceded: 0 };
+      if (!teamStats[at]) teamStats[at] = { scored: 0, conceded: 0 };
+      teamStats[ht].scored   += hg;
+      teamStats[ht].conceded += ag;
+      teamStats[at].scored   += ag;
+      teamStats[at].conceded += hg;
+
+      // Check for red cards in bookings
+      (m.bookings || []).forEach(b => {
+        if (b.card === 'RED_CARD' || b.card === 'YELLOW_RED_CARD') {
+          totalRedCards++;
+          if (!firstRedCard) {
+            firstRedCard = {
+              player: b.player?.name || 'Unknown',
+              team:   nn(b.team?.name || 'Unknown'),
+              match:  `${ht} vs ${at}`,
+              minute: b.minute
+            };
+          }
+        }
+      });
     });
 
-    const responseText = await response.text();
-    console.log('Anthropic status:', response.status);
+    const goalsByTeam = Object.entries(teamStats)
+      .map(([team, s]) => ({ team, scored: s.scored, conceded: s.conceded }))
+      .sort((a, b) => b.scored - a.scored);
 
-    if (!response.ok) {
-      return res.status(500).json({ error: 'Anthropic API error: ' + responseText.slice(0, 200) });
-    }
+    // Top scorers from the scorers endpoint
+    const topScorers = (scorerData.scorers || []).slice(0, 10).map(s => ({
+      player: s.player?.name,
+      team:   nn(s.team?.shortName || s.team?.name),
+      goals:  s.goals
+    }));
 
-    let data;
-    try { data = JSON.parse(responseText); } catch(e) {
-      return res.status(500).json({ error: 'Invalid JSON from Anthropic' });
-    }
-
-    if (data.content && data.content[0] && data.content[0].text) {
-      const raw = data.content[0].text;
-      const cleaned = raw.replace(/^```json\s*/,'').replace(/^```\s*/,'').replace(/```\s*$/,'').trim();
-      try {
-        return res.json({ ok: true, data: JSON.parse(cleaned) });
-      } catch(e) {
-        return res.status(500).json({ error: 'Model did not return valid JSON' });
-      }
-    }
-    res.json(data);
+    res.json({
+      ok: true,
+      totalGoals,
+      totalMatches,
+      avgGoalsPerMatch: totalMatches > 0 ? (totalGoals / totalMatches).toFixed(2) : 0,
+      totalRedCards,
+      firstRedCard,
+      goalsByTeam,
+      topScorers
+    });
   } catch(err) {
-    console.error('Claude route error:', err.message);
-    res.status(500).json({ error: err.message });
+    console.error('Stats error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
   }
 });
 
