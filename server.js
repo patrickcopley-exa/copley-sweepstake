@@ -136,9 +136,15 @@ const FDORG_BASE = 'https://api.football-data.org/v4';
 
 async function footballDataFetch(path) {
   const apiKey = process.env.FOOTBALL_API_KEY;
-  const headers = apiKey ? { 'X-Auth-Token': apiKey } : {};
-  const r = await fetch(`${FDORG_BASE}${path}`, { headers });
-  if (!r.ok) throw new Error(`football-data.org ${r.status}: ${await r.text()}`);
+  if (!apiKey) throw new Error('FOOTBALL_API_KEY not set in Railway Variables.');
+  const r = await fetch(`${FDORG_BASE}${path}`, {
+    headers: { 'X-Auth-Token': apiKey }
+  });
+  if (!r.ok) {
+    const txt = await r.text();
+    console.error(`football-data.org ${r.status}:`, txt.slice(0, 200));
+    throw new Error(`football-data.org error ${r.status}: ${txt.slice(0, 100)}`);
+  }
   return r.json();
 }
 
@@ -179,9 +185,16 @@ app.get('/api/scores', async (req, res) => {
     const upcoming = allMatches.filter(m => m.status === 'TIMED' || m.status === 'SCHEDULED').slice(0, 10);
     const relevant = [...live, ...finished, ...upcoming];
 
+    const NAME_MAP2 = {
+      'Korea Republic': 'South Korea', 'Czechia': 'Czech Republic',
+      'Bosnia and Herzegovina': 'Bosnia & Herz.', "Côte d'Ivoire": 'Ivory Coast',
+      'Ivory Coast': 'Ivory Coast', 'Turkey': 'Türkiye', 'Curacao': 'Curaçao',
+    };
+    const nn = n => NAME_MAP2[n] || n;
+
     const matches = relevant.map(m => ({
-      homeTeam: m.homeTeam.shortName || m.homeTeam.name,
-      awayTeam: m.awayTeam.shortName || m.awayTeam.name,
+      homeTeam: nn(m.homeTeam.shortName || m.homeTeam.name),
+      awayTeam: nn(m.awayTeam.shortName || m.awayTeam.name),
       homeScore: m.score.fullTime.home,
       awayScore: m.score.fullTime.away,
       homeScoreHT: m.score.halfTime.home,
@@ -208,11 +221,24 @@ app.get('/api/scores', async (req, res) => {
 app.get('/api/standings', async (req, res) => {
   try {
     const data = await footballDataFetch('/competitions/WC/standings');
+    // Normalise team names to match our OFFICIAL_GROUPS names
+    const NAME_MAP = {
+      'Korea Republic': 'South Korea',
+      'Czechia':        'Czech Republic',
+      'Bosnia and Herzegovina': 'Bosnia & Herz.',
+      'DR Congo':       'DR Congo',
+      'Ivory Coast':    'Ivory Coast',
+      "Côte d'Ivoire":  'Ivory Coast',
+      'Turkey':         'Türkiye',
+      'Curacao':        'Curaçao',
+    };
+    const normName = n => NAME_MAP[n] || n;
+
     const groups = (data.standings || []).map(g => ({
       name: g.group ? g.group.replace('GROUP_','Group ') : 'Group',
       teams: (g.table || []).map(row => ({
         pos:    row.position,
-        team:   row.team.shortName || row.team.name,
+        team:   normName(row.team.shortName || row.team.name),
         flag:   '',
         played: row.playedGames,
         won:    row.won,
