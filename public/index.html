@@ -418,7 +418,7 @@ let liveGroups = OFFICIAL_GROUPS.map(g=>({
 }));
 
 /* Shared state — loaded from server */
-let state = {"participants": [{"name": "Jacob", "team": "Spain"}, {"name": "Jacob", "team": "Panama"}, {"name": "Susan", "team": "Switzerland"}, {"name": "Susan", "team": "South Africa"}, {"name": "Mick", "team": "South Korea"}, {"name": "Mick", "team": "Bosnia & Herz."}, {"name": "Lucie", "team": "Senegal"}, {"name": "Lucie", "team": "DR Congo"}, {"name": "Michelle", "team": "Uruguay"}, {"name": "Nick", "team": "Brazil"}, {"name": "Nick", "team": "Scotland"}, {"name": "Michelle", "team": "Paraguay"}, {"name": "Henry", "team": "Croatia"}, {"name": "Isobelle", "team": "Germany"}, {"name": "Isobelle", "team": "Ghana"}, {"name": "Patrick", "team": "Morocco"}, {"name": "Patrick", "team": "Egypt"}, {"name": "Leanne", "team": "Mexico"}], "winner": "", "runnerUp": "", "firstRedCard": "", "topScorerTeam": "", "mostConcededTeam": ""};
+let state = {"participants": [{"name": "Jacob", "team": "Spain"}, {"name": "Jacob", "team": "Panama"}, {"name": "Susan", "team": "Switzerland"}, {"name": "Susan", "team": "South Africa"}, {"name": "Mick", "team": "South Korea"}, {"name": "Mick", "team": "Bosnia & Herz."}, {"name": "Lucie", "team": "Senegal"}, {"name": "Lucie", "team": "DR Congo"}, {"name": "Michelle", "team": "Uruguay"}, {"name": "Nick", "team": "Brazil"}, {"name": "Nick", "team": "Scotland"}, {"name": "Michelle", "team": "Paraguay"}, {"name": "Henry", "team": "Croatia"}, {"name": "Isobelle", "team": "Germany"}, {"name": "Isobelle", "team": "Ghana"}, {"name": "Patrick", "team": "Morocco"}, {"name": "Patrick", "team": "Egypt"}, {"name": "Leanne", "team": "Mexico"}], "winner": "", "runnerUp": "", "firstRedCard": "", "topScorerTeam": "", "mostConcededTeam": "", "scores": [], "groups": [], "scoresUpdated": "", "standingsUpdated": ""};
 
 /* ═══════════════════════════════════════════════
    SYNC DOT
@@ -455,6 +455,8 @@ async function loadState(){
         body: JSON.stringify(state)
       }).catch(()=>{});
     }
+    // Restore cached scores and standings if available
+    if(state.groups?.length){ liveGroups = state.groups; }
     setSyncStatus("ok");
     renderAll();
   } catch(e){
@@ -491,7 +493,8 @@ function switchTab(name){
   document.getElementById("tab-"+name).classList.add("active");
   document.querySelectorAll(".tab")[TABS.indexOf(name)].classList.add("active");
   if(name==="sweepstake") renderSweepstake();
-  if(name==="standings")  renderStandings(liveGroups);
+  if(name==="scores")     { if(state.scores?.length){ renderScores(state.scores); document.getElementById("upd-scores").textContent=state.scoresUpdated?"Updated "+state.scoresUpdated:"Click Refresh"; } }
+  if(name==="standings")  { if(state.groups?.length){ liveGroups=state.groups; renderStandings(liveGroups); document.getElementById("upd-standings").textContent=state.standingsUpdated?"Live — "+state.standingsUpdated:"Click Refresh"; } }
   if(name==="knockout")   buildBracket();
   if(name==="manage")     loadState();
 }
@@ -756,8 +759,12 @@ async function fetchScores(){
     const r=await fetch('/api/scores');
     const d=await r.json();
     if(!d.ok) throw new Error(d.error||'Failed');
-    u.textContent="Updated "+new Date().toLocaleTimeString();
-    renderScores(d.matches||[]);
+    state.scores = d.matches||[];
+    state.scoresUpdated = new Date().toLocaleTimeString();
+    u.textContent="Updated "+state.scoresUpdated;
+    renderScores(state.scores);
+    // Persist to server so other devices and page reloads see latest scores
+    saveState({scores: state.scores, scoresUpdated: state.scoresUpdated}).catch(()=>{});
   }catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load scores: ${e.message}</div>`;u.textContent="Failed";}
 }
 function renderScores(matches){
@@ -783,9 +790,13 @@ async function fetchStandings(){
           flag:og?.teams.find(ot=>ot.team===t.team||t.team.includes(ot.team.split(' ')[0]))?.flag||''
         }))};
       });
+      state.groups = liveGroups;
+      state.standingsUpdated = new Date().toLocaleTimeString();
+      u.textContent="Live — "+state.standingsUpdated;
       renderStandings(liveGroups);
       buildBracket();
-      u.textContent="Live — "+new Date().toLocaleTimeString();
+      // Persist to server so other devices and page reloads see latest standings
+      saveState({groups: state.groups, standingsUpdated: state.standingsUpdated}).catch(()=>{});
     }
   }catch(e){u.textContent="Could not load — showing official draw"; console.error(e);}
 }
