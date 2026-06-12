@@ -782,18 +782,58 @@ function renderStandings(groups){
 
 async function fetchStats(){
   const c=document.getElementById("stats-container"),u=document.getElementById("upd-stats");
-  c.innerHTML='<p style="color:var(--grey);font-size:13px;padding:16px 0">Loading…</p>';
-  try{const d=await callClaude("stats");
-    if(d.firstRedCard?.player&&!state.firstRedCard){state.firstRedCard=d.firstRedCard.player+" ("+d.firstRedCard.team+")";await saveState({firstRedCard:state.firstRedCard});}
-    if(d.goalsByTeam?.length){const ts=[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored)[0];const tc=[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded)[0];let changed={};if(!state.topScorerTeam){state.topScorerTeam=ts.team;changed.topScorerTeam=ts.team;}if(!state.mostConcededTeam){state.mostConcededTeam=tc.team;changed.mostConcededTeam=tc.team;}if(Object.keys(changed).length)await saveState(changed);}
-    u.textContent="Updated "+new Date().toLocaleTimeString();renderStats(d);renderPrizes();}
-  catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load: ${e.message}</div>`;u.textContent="Failed";}
+  c.innerHTML='<p style="color:var(--grey);font-size:13px;padding:16px 0">Loading real tournament stats…</p>';
+  try{
+    const r=await fetch('/api/stats');
+    const d=await r.json();
+    if(!d.ok) throw new Error(d.error||'Failed');
+    // Update prize-relevant state from real data
+    if(d.firstRedCard?.player&&!state.firstRedCard){
+      state.firstRedCard=d.firstRedCard.player+" ("+d.firstRedCard.team+")";
+      await saveState({firstRedCard:state.firstRedCard});
+    }
+    if(d.goalsByTeam?.length){
+      const ts=[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored)[0];
+      const tc=[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded)[0];
+      let ch={};
+      if(!state.topScorerTeam&&ts){state.topScorerTeam=ts.team;ch.topScorerTeam=ts.team;}
+      if(!state.mostConcededTeam&&tc){state.mostConcededTeam=tc.team;ch.mostConcededTeam=tc.team;}
+      if(Object.keys(ch).length) await saveState(ch);
+    }
+    u.textContent="Updated "+new Date().toLocaleTimeString();
+    renderStats(d);
+    renderPrizes();
+  }catch(e){c.innerHTML=`<div class="empty" style="color:var(--red)">Could not load stats: ${e.message}</div>`;u.textContent="Failed";}
 }
 function renderStats(d){
   const c=document.getElementById("stats-container");
-  let h=`<div class="stat-grid">`;[{l:"Total goals",v:d.totalGoals,accent:true},{l:"Matches played",v:d.totalMatches},{l:"Avg goals/game",v:d.avgGoalsPerMatch?Number(d.avgGoalsPerMatch).toFixed(1):"-"},{l:"Red cards",v:d.totalRedCards,red:true}].forEach(s=>{h+=`<div class="stat-card" style="border-top:3px solid ${s.red?"var(--red)":s.accent?"var(--gold)":"var(--grey-light)"}"><div class="stat-label">${s.l}</div><div class="stat-value" style="${s.red?"color:var(--red)":""}">${s.v??"-"}</div></div>`;});h+=`</div>`;
-  if(d.firstRedCard?.player)h+=`<div class="alert-rc"><span style="font-size:20px">🟥</span><div><strong>First red card:</strong> ${d.firstRedCard.player} — ${d.firstRedCard.team}, ${d.firstRedCard.match??"?"} (min ${d.firstRedCard.minute??"?"})</div></div>`;
-  if(d.goalsByTeam?.length){const maxG=Math.max(...d.goalsByTeam.map(t=>t.scored),1),maxC=Math.max(...d.goalsByTeam.map(t=>t.conceded),1);h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">`;h+=`<div><div class="slabel">Most goals scored</div><div class="twrap"><table class="tbl"><tbody>`;[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored).slice(0,6).forEach(t=>{const p=Math.round(t.scored/maxG*100);h+=`<tr><td style="white-space:nowrap">${tf(t.team)}${t.team}</td><td style="font-weight:700;text-align:right;width:24px">${t.scored}</td><td style="width:74px"><span class="bar-w"><span class="bar-f" style="width:${p}%"></span></span></td></tr>`;});h+=`</tbody></table></div></div>`;h+=`<div><div class="slabel">Most conceded</div><div class="twrap"><table class="tbl"><tbody>`;[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded).slice(0,6).forEach(t=>{const p=Math.round(t.conceded/maxC*100);h+=`<tr><td style="white-space:nowrap">${tf(t.team)}${t.team}</td><td style="font-weight:700;text-align:right;width:24px">${t.conceded}</td><td style="width:74px"><span class="bar-w"><span class="bar-f r" style="width:${p}%"></span></span></td></tr>`;});h+=`</tbody></table></div></div></div>`;}
+  let h=`<div class="stat-grid">`;
+  [{l:"Total goals",v:d.totalGoals,accent:true},{l:"Matches played",v:d.totalMatches},{l:"Avg goals/game",v:d.avgGoalsPerMatch?Number(d.avgGoalsPerMatch).toFixed(1):"-"},{l:"Red cards",v:d.totalRedCards,red:true}].forEach(s=>{
+    h+=`<div class="stat-card" style="border-top:3px solid ${s.red?"var(--red)":s.accent?"var(--gold)":"var(--grey-light)"}"><div class="stat-label">${s.l}</div><div class="stat-value" style="${s.red?"color:var(--red)":""}">${s.v??"-"}</div></div>`;
+  });
+  h+=`</div>`;
+  if(d.firstRedCard?.player) h+=`<div class="alert-rc"><span style="font-size:20px">🟥</span><div><strong>First red card:</strong> ${d.firstRedCard.player} — ${d.firstRedCard.team}, ${d.firstRedCard.match??"?"} (min ${d.firstRedCard.minute??"?"})</div></div>`;
+  if(d.totalMatches===0){h+='<div class="empty">No matches played yet — stats will appear once the tournament begins.</div>';c.innerHTML=h;return;}
+  h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">`;
+  // Top scorers
+  if(d.topScorers?.length){
+    h+=`<div><div class="slabel">Top scorers</div><div class="twrap"><table class="tbl"><tbody>`;
+    d.topScorers.forEach(s=>{h+=`<tr><td style="white-space:nowrap">${tf(s.team)}${s.player}</td><td style="font-size:10px;color:var(--grey);white-space:nowrap">${s.team}</td><td style="font-weight:700;text-align:right;width:24px">${s.goals}</td></tr>`;});
+    h+=`</tbody></table></div></div>`;
+  } else if(d.goalsByTeam?.length){
+    const maxG=Math.max(...d.goalsByTeam.map(t=>t.scored),1);
+    h+=`<div><div class="slabel">Most goals scored</div><div class="twrap"><table class="tbl"><tbody>`;
+    [...d.goalsByTeam].sort((a,b)=>b.scored-a.scored).slice(0,6).forEach(t=>{const p=Math.round(t.scored/maxG*100);h+=`<tr><td style="white-space:nowrap">${tf(t.team)}${t.team}</td><td style="font-weight:700;text-align:right;width:24px">${t.scored}</td><td style="width:74px"><span class="bar-w"><span class="bar-f" style="width:${p}%"></span></span></td></tr>`;});
+    h+=`</tbody></table></div></div>`;
+  }
+  // Most conceded
+  if(d.goalsByTeam?.length){
+    const maxC=Math.max(...d.goalsByTeam.map(t=>t.conceded),1);
+    h+=`<div><div class="slabel">Most conceded</div><div class="twrap"><table class="tbl"><tbody>`;
+    [...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded).slice(0,6).forEach(t=>{const p=Math.round(t.conceded/maxC*100);h+=`<tr><td style="white-space:nowrap">${tf(t.team)}${t.team}</td><td style="font-weight:700;text-align:right;width:24px">${t.conceded}</td><td style="width:74px"><span class="bar-w"><span class="bar-f r" style="width:${p}%"></span></span></td></tr>`;});
+    h+=`</tbody></table></div></div>`;
+  }
+  h+=`</div>`;
   c.innerHTML=h;
 }
 
