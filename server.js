@@ -310,25 +310,13 @@ app.get('/api/stats', async (req, res) => {
       teamStats[at].scored   += ag;
       teamStats[at].conceded += hg;
 
-      // Check for red cards in bookings
-      (m.bookings || []).forEach(b => {
-        if (b.card === 'RED_CARD' || b.card === 'YELLOW_RED_CARD') {
-          totalRedCards++;
-          if (!firstRedCard) {
-            firstRedCard = {
-              player: b.player?.name || 'Unknown',
-              team:   nn(b.team?.name || 'Unknown'),
-              match:  `${ht} vs ${at}`,
-              minute: b.minute
-            };
-          }
-        }
-      });
+      // Note: bookings/cards not available on free tier of football-data.org
+      // Red card tracking requires a paid plan
     });
 
     const goalsByTeam = Object.entries(teamStats)
       .map(([team, s]) => ({ team, scored: s.scored, conceded: s.conceded }))
-      .sort((a, b) => b.scored - a.scored);
+      .sort((a, b) => b.scored - a.scored || a.team.localeCompare(b.team));
 
     // Top scorers from the scorers endpoint
     const topScorers = (scorerData.scorers || []).slice(0, 10).map(s => ({
@@ -342,8 +330,8 @@ app.get('/api/stats', async (req, res) => {
       totalGoals,
       totalMatches,
       avgGoalsPerMatch: totalMatches > 0 ? (totalGoals / totalMatches).toFixed(2) : 0,
-      totalRedCards,
-      firstRedCard,
+      totalRedCards: null,   // not available on free tier
+      firstRedCard: null,    // not available on free tier
       goalsByTeam,
       topScorers
     });
