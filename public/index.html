@@ -380,13 +380,38 @@
 /* ═══════════════════════════════════════════════
    PRIZES
 ═══════════════════════════════════════════════ */
-const PRIZES = {
-  winner:    { label:"Tournament winner",   emoji:"🏆", amount:50, cls:"h-gold"   },
-  runnerUp:  { label:"Runner-up",           emoji:"🥈", amount:20, cls:"h-silver" },
-  topScorer: { label:"Top scoring team",    emoji:"⚽", amount:10, cls:"h-cyan"   },
-  conceded:  { label:"Most goals conceded", emoji:"🔴", amount:10, cls:"h-red"    },
-  redCard:   { label:"First red card",      emoji:"🟥", amount:6,  cls:"h-red"    },
+// Base prize ratios — scale to actual pot size
+const PRIZE_BASE = { winner:50, runnerUp:20, topScorer:10, conceded:10, redCard:6 };
+const PRIZE_BASE_TOTAL = 96; // sum of above
+
+const PRIZE_META = {
+  winner:    { label:"Tournament winner",   emoji:"🏆", cls:"h-gold"   },
+  runnerUp:  { label:"Runner-up",           emoji:"🥈", cls:"h-silver" },
+  topScorer: { label:"Top scoring team",    emoji:"⚽", cls:"h-cyan"   },
+  conceded:  { label:"Most goals conceded", emoji:"🔴", cls:"h-red"    },
+  redCard:   { label:"First red card",      emoji:"🟥", cls:"h-red"    },
 };
+
+function computePrizes(){
+  const pot = state.participants.length * 2;
+  if(pot === 0) return Object.fromEntries(Object.entries(PRIZE_META).map(([k,v])=>([k,{...v,amount:PRIZE_BASE[k]}])));
+  const scale = pot / PRIZE_BASE_TOTAL;
+  const amounts = {};
+  let sum = 0;
+  // Round each prize to whole pounds — winner absorbs any remainder so total = pot exactly
+  for(const k of ['runnerUp','topScorer','conceded','redCard']){
+    amounts[k] = Math.round(PRIZE_BASE[k] * scale);
+    sum += amounts[k];
+  }
+  amounts.winner = pot - sum;
+  return Object.fromEntries(Object.entries(PRIZE_META).map(([k,v])=>([k,{...v,amount:amounts[k]}])));
+}
+
+// Format a number — whole pounds show as £X, pence show as £X.XX
+function fmt(n){ return Number.isInteger(n) ? '£'+n : '£'+n.toFixed(2); }
+
+// PRIZES is computed — always use computePrizes() for current amounts
+const PRIZES = PRIZE_META; // kept for backward compat, use computePrizes() for amounts
 
 /* ═══════════════════════════════════════════════
    OFFICIAL FIFA WORLD CUP 2026 GROUPS
@@ -418,7 +443,7 @@ let liveGroups = OFFICIAL_GROUPS.map(g=>({
 }));
 
 /* Shared state — loaded from server */
-let state = {"participants": [{"name": "Jacob", "team": "Spain"}, {"name": "Jacob", "team": "Panama"}, {"name": "Susan", "team": "Switzerland"}, {"name": "Susan", "team": "South Africa"}, {"name": "Mick", "team": "South Korea"}, {"name": "Mick", "team": "Bosnia & Herz."}, {"name": "Lucie", "team": "Senegal"}, {"name": "Lucie", "team": "DR Congo"}, {"name": "Michelle", "team": "Uruguay"}, {"name": "Nick", "team": "Brazil"}, {"name": "Nick", "team": "Scotland"}, {"name": "Michelle", "team": "Paraguay"}, {"name": "Henry", "team": "Croatia"}, {"name": "Isobelle", "team": "Germany"}, {"name": "Isobelle", "team": "Ghana"}, {"name": "Patrick", "team": "Morocco"}, {"name": "Patrick", "team": "Egypt"}, {"name": "Leanne", "team": "Mexico"}], "winner": "", "runnerUp": "", "firstRedCard": "", "topScorerTeam": "", "mostConcededTeam": "", "scores": [], "groups": [], "scoresUpdated": "", "standingsUpdated": ""};
+let state = {"participants": [{"name": "Jacob", "team": "Spain"}, {"name": "Jacob", "team": "Panama"}, {"name": "Susan", "team": "Switzerland"}, {"name": "Susan", "team": "South Africa"}, {"name": "Mick", "team": "South Korea"}, {"name": "Mick", "team": "Bosnia & Herz."}, {"name": "Lucie", "team": "Senegal"}, {"name": "Lucie", "team": "DR Congo"}, {"name": "Michelle", "team": "Uruguay"}, {"name": "Nick", "team": "Brazil"}, {"name": "Nick", "team": "Scotland"}, {"name": "Michelle", "team": "Paraguay"}, {"name": "Henry", "team": "Croatia"}, {"name": "Isobelle", "team": "Germany"}, {"name": "Isobelle", "team": "Ghana"}, {"name": "Patrick", "team": "Morocco"}, {"name": "Patrick", "team": "Egypt"}, {"name": "Leanne", "team": "Mexico"}], "winner": "", "runnerUp": "", "firstRedCard": "", "topScorerTeam": "", "mostConcededTeam": "", "scores": [], "groups": [], "scoresUpdated": "", "standingsUpdated": "", "statsData": null, "statsUpdated": ""};
 
 /* ═══════════════════════════════════════════════
    SYNC DOT
@@ -432,7 +457,7 @@ function setSyncStatus(status){ // 'ok' | 'syncing' | 'offline'
 /* ═══════════════════════════════════════════════
    SERVER STATE
 ═══════════════════════════════════════════════ */
-const BAKED_PARTICIPANTS = state.participants.slice(); // save baked-in entries
+const BAKED_PARTICIPANTS = state.participants.slice(); // save baked-in 18 entries
 
 async function loadState(){
   setSyncStatus("syncing");
@@ -455,10 +480,21 @@ async function loadState(){
         body: JSON.stringify(state)
       }).catch(()=>{});
     }
-    // Restore cached scores and standings if available
+    // Restore cached scores, standings and stats if available
     if(state.groups?.length){ liveGroups = state.groups; }
     setSyncStatus("ok");
     renderAll();
+    // Re-render prizes and stats from cached data so everything is up to date on load
+    if(state.statsData){
+      renderPrizes();
+      renderParticipants();
+      // If stats tab is currently active, render it too
+      if(document.getElementById("tab-stats")?.classList.contains("active")){
+        renderStats(state.statsData);
+        const u=document.getElementById("upd-stats");
+        if(u&&state.statsUpdated) u.textContent="Updated "+state.statsUpdated;
+      }
+    }
   } catch(e){
     setSyncStatus("offline");
     console.error("Could not load state:", e);
@@ -496,6 +532,22 @@ function switchTab(name){
   if(name==="scores")     { if(state.scores?.length){ renderScores(state.scores); document.getElementById("upd-scores").textContent=state.scoresUpdated?"Updated "+state.scoresUpdated:"Click Refresh"; } }
   if(name==="standings")  { if(state.groups?.length){ liveGroups=state.groups; renderStandings(liveGroups); document.getElementById("upd-standings").textContent=state.standingsUpdated?"Live — "+state.standingsUpdated:"Click Refresh"; } }
   if(name==="knockout")   buildBracket();
+  if(name==="stats"){
+    if(state.statsData){
+      renderStats(state.statsData);
+      const us=document.getElementById("upd-stats");
+      if(us) us.textContent=state.statsUpdated?"Updated "+state.statsUpdated:"Click Refresh";
+    } else {
+      // No cached data yet — try loading from server first
+      loadState().then(()=>{
+        if(state.statsData){
+          renderStats(state.statsData);
+          const us=document.getElementById("upd-stats");
+          if(us) us.textContent=state.statsUpdated?"Updated "+state.statsUpdated:"Click Refresh to fetch live stats";
+        }
+      });
+    }
+  }
   if(name==="manage")     loadState();
 }
 
@@ -600,42 +652,110 @@ async function addParticipant(pot){
 ═══════════════════════════════════════════════ */
 function renderPotBar(){
   const count = state.participants.length;
-  const total = Object.values(PRIZES).reduce((s,p)=>s+p.amount,0);
+  const pot   = count * 2;
+  const prizes = computePrizes();
+  const total = Math.round(Object.values(prizes).reduce((s,p)=>s+p.amount,0)*100)/100;
   document.getElementById("pot-bar-section").innerHTML = `
     <div class="pot-bar">
       <div class="pot-item"><div class="pot-label">Entries</div><div class="pot-value">${count}</div></div>
       <div class="pot-sep"></div>
-      <div class="pot-item"><div class="pot-label">Pot collected</div><div class="pot-value">£${count*2}</div></div>
+      <div class="pot-item"><div class="pot-label">Pot collected</div><div class="pot-value">£${pot}</div></div>
       <div class="pot-sep"></div>
-      <div class="pot-item"><div class="pot-label">Total prizes</div><div class="pot-value">£${total}</div></div>
+      <div class="pot-item"><div class="pot-label">Total prizes</div><div class="pot-value">${fmt(total)}</div></div>
       <div class="pot-sep"></div>
       <div class="pot-item"><div class="pot-label">Per entry</div><div class="pot-value">£2</div></div>
     </div>`;
 }
 
+// Find owner of a team — returns participant or null
+function teamOwner(team){ return team ? state.participants.find(p=>p.team===team)||null : null; }
+
+// Parse a team field that may contain comma-separated tied teams
+function parseTeams(field){ return field ? field.split(',').map(t=>t.trim()).filter(Boolean) : []; }
+
+// Roll over to next participant who owns a team in this tournament
+// If winning team has no owner, find the next best team's owner
+function resolveWinner(teamField, orderedTeams){
+  if(!teamField) return {team:null, participant:null, rolledOver:false};
+  const direct = teamOwner(teamField);
+  if(direct) return {team:teamField, participant:direct, rolledOver:false};
+  // Roll over — find next team in ordered list that has an owner
+  for(const t of orderedTeams){
+    if(t === teamField) continue;
+    const p = teamOwner(t);
+    if(p) return {team:t, participant:p, rolledOver:true, original:teamField};
+  }
+  return {team:teamField, participant:null, rolledOver:false};
+}
+
 function renderPrizes(){
-  const wP  = state.participants.find(p=>p.team===state.winner);
-  const rP  = state.participants.find(p=>p.team===state.runnerUp);
-  const gP  = state.participants.find(p=>p.team===state.topScorerTeam);
-  const cP  = state.participants.find(p=>p.team===state.mostConcededTeam);
+  const prizes = computePrizes();
+
+  // Build ordered team lists for rollover
+  const orderedByGoals = state.groups.length
+    ? state.groups.flatMap(g=>[...g.teams].sort((a,b)=>b.gf-a.gf)).map(t=>t.team)
+    : state.participants.map(p=>p.team);
+  const orderedByConceded = state.groups.length
+    ? state.groups.flatMap(g=>[...g.teams].sort((a,b)=>b.ga-a.ga)).map(t=>t.team)
+    : state.participants.map(p=>p.team);
+
   const rcTeam = state.firstRedCard?(state.firstRedCard.match(/\(([^)]+)\)/)?.[1]||""):"";
-  const rcP = rcTeam?state.participants.find(p=>p.team===rcTeam):null;
+
+  // Resolve winners — supports ties (comma-separated team strings)
+  function resolveCategory(teamsStr, orderedList){
+    const teams = parseTeams(teamsStr);
+    if(!teams.length) return [];
+    // For each team find owner (with rollover if needed)
+    const results = [];
+    teams.forEach(team => {
+      const res = resolveWinner(team, orderedList);
+      results.push(res);
+    });
+    return results;
+  }
+
   const cards = [
-    {key:"winner",   p:wP,  w:state.winner,          raw:false},
-    {key:"runnerUp", p:rP,  w:state.runnerUp,         raw:false},
-    {key:"topScorer",p:gP,  w:state.topScorerTeam,    raw:false},
-    {key:"conceded", p:cP,  w:state.mostConcededTeam, raw:false},
-    {key:"redCard",  p:rcP, w:state.firstRedCard,      raw:true},
+    { key:"winner",    teamsStr:state.winner,          ordered:orderedByGoals,    raw:false, single:true },
+    { key:"runnerUp",  teamsStr:state.runnerUp,         ordered:orderedByGoals,    raw:false, single:true },
+    { key:"topScorer", teamsStr:state.topScorerTeam,    ordered:orderedByGoals,    raw:false, single:false },
+    { key:"conceded",  teamsStr:state.mostConcededTeam, ordered:orderedByConceded, raw:false, single:false },
+    { key:"redCard",   teamsStr:rcTeam,                 ordered:[],                raw:true,  single:true  },
   ];
+
   document.getElementById("prize-strip").innerHTML = cards.map(c=>{
-    const pr=PRIZES[c.key];
-    return `<div class="prize-card ${c.w?pr.cls:''}">
+    const pr = prizes[c.key];
+    const hasOutcome = !!c.teamsStr;
+    if(!hasOutcome){
+      return `<div class="prize-card">
+        <div class="prize-emoji">${pr.emoji}</div>
+        <div class="prize-cat">${pr.label}</div>
+        <div class="prize-amount">£${pr.amount}</div>
+        <div class="prize-empty">Not yet decided</div>
+      </div>`;
+    }
+
+    const results = c.raw
+      ? [{team:rcTeam, participant:teamOwner(rcTeam), rolledOver:false}]
+      : resolveCategory(c.teamsStr, c.ordered);
+
+    const isTie = results.length > 1;
+    // Split to exact pennies — divide evenly with no rounding gaps
+    const shareAmount = isTie ? Math.round(pr.amount / results.length * 100) / 100 : pr.amount;
+
+    const winnersHtml = results.map((res, i) => {
+      return `<div style="margin-top:${i>0?'6px':'3px'}">
+        <div class="prize-winner">${res.participant ? res.participant.name : 'No participant'}</div>
+        <div class="prize-team">${res.team ? tf(res.team)+res.team : ''}</div>
+        ${res.rolledOver ? `<div style="font-size:10px;color:var(--grey);font-style:italic">Rolled from ${tf(res.original)}${res.original}</div>` : ''}
+        ${isTie ? `<div style="font-size:11px;font-weight:700;color:var(--gold-dark);margin-top:1px">Shared — ${fmt(shareAmount)}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    return `<div class="prize-card ${pr.cls}">
       <div class="prize-emoji">${pr.emoji}</div>
-      <div class="prize-cat">${pr.label}</div>
-      <div class="prize-amount">£${pr.amount}</div>
-      ${c.w
-        ?`<div class="prize-winner">${c.p?c.p.name:"No participant"}</div><div class="prize-team">${c.raw?c.w:tf(c.w)+c.w}</div>`
-        :`<div class="prize-empty">Not yet decided</div>`}
+      <div class="prize-cat">${pr.label}${isTie?' <span style="font-size:9px;background:var(--gold-light);color:var(--gold-dark);padding:1px 5px;border-radius:3px;font-weight:700">TIE</span>':''}</div>
+      <div class="prize-amount">${isTie ? results.map(()=>fmt(shareAmount)).join(' / ') : fmt(pr.amount)}</div>
+      ${winnersHtml}
     </div>`;
   }).join("");
 }
@@ -656,28 +776,43 @@ function renderParticipants(){
   if(!state.participants.length){el.innerHTML='<div class="empty">No participants yet — go to <strong>Manage</strong> to add family members and draw their teams.</div>';return;}
   const rcTeam=state.firstRedCard?(state.firstRedCard.match(/\(([^)]+)\)/)?.[1]||""):"";
   el.innerHTML=`<div class="pgrid">`+state.participants.map(p=>{
-    const isW=p.team===state.winner,isR=p.team===state.runnerUp;
-    const isG=p.team===state.topScorerTeam,isC=p.team===state.mostConcededTeam,isRC=rcTeam&&p.team===rcTeam;
-    const winnings=(isW?50:0)+(isR?20:0)+(isG?10:0)+(isC?10:0)+(isRC?6:0);
+    const prizes=computePrizes();
+    const rcTeamInner=state.firstRedCard?(state.firstRedCard.match(/\(([^)]+)\)/)?.[1]||""):"";
+    const topTeams=parseTeams(state.topScorerTeam);
+    const concTeams=parseTeams(state.mostConcededTeam);
+    const topShare=topTeams.length>1?Math.round(prizes.topScorer.amount/topTeams.length*100)/100:prizes.topScorer.amount;
+    const concShare=concTeams.length>1?Math.round(prizes.conceded.amount/concTeams.length*100)/100:prizes.conceded.amount;
+    const isW=p.team===state.winner;
+    const isR=p.team===state.runnerUp;
+    const isG=topTeams.includes(p.team);
+    const isC=concTeams.includes(p.team);
+    const isRC=rcTeamInner&&p.team===rcTeamInner;
+    const winnings=(isW?prizes.winner.amount:0)+(isR?prizes.runnerUp.amount:0)+(isG?topShare:0)+(isC?concShare:0)+(isRC?prizes.redCard.amount:0);
     const badges=[
-      isW?'<span class="pbadge bw">🏆 £50</span>':"",
-      isR?'<span class="pbadge brr">🥈 £20</span>':"",
-      isG?'<span class="pbadge bg">⚽ £10</span>':"",
-      isC?'<span class="pbadge bc">🔴 £10</span>':"",
-      isRC?'<span class="pbadge brc">🟥 £6</span>':"",
+      isW?`<span class="pbadge bw">🏆 ${fmt(prizes.winner.amount)}</span>`:"",
+      isR?`<span class="pbadge brr">🥈 ${fmt(prizes.runnerUp.amount)}</span>`:"",
+      isG?`<span class="pbadge bg">⚽ ${fmt(topShare)}${topTeams.length>1?' (shared)':''}</span>`:"",
+      isC?`<span class="pbadge bc">🔴 ${fmt(concShare)}${concTeams.length>1?' (shared)':''}</span>`:"",
+      isRC?`<span class="pbadge brc">🟥 ${fmt(prizes.redCard.amount)}</span>`:"",
     ].filter(Boolean).join("");
     return `<div class="pcard ${isW?"pw":isR?"pr":""}">
       <div class="pavatar">${initials(p.name)}</div>
       <div class="pname">${p.name}</div>
       <div class="pteam">${tf(p.team)}${p.team}</div>
-      ${winnings?`<div style="font-family:'Montserrat',sans-serif;font-size:14px;font-weight:800;color:var(--gold-dark);margin-top:6px">£${winnings} won</div>`:""}
+      ${winnings?`<div style="font-family:'Montserrat',sans-serif;font-size:14px;font-weight:800;color:var(--gold-dark);margin-top:6px">${fmt(winnings)} won</div>`:""}
       ${badges?`<div class="pbadges">${badges}</div>`:""}
     </div>`;
   }).join("")+`</div>`;
 }
 
 function renderSweepstake(){ renderPotBar(); renderPrizes(); renderPodium(); renderParticipants(); }
-function renderAll(){ renderSweepstake(); renderManage(); }
+function renderAll(){
+  renderSweepstake();
+  renderManage();
+  if(state.statsData && document.getElementById("tab-stats")?.classList.contains("active")){
+    renderStats(state.statsData);
+  }
+}
 
 /* ═══════════════════════════════════════════════
    MANAGE — no remove, locked in
@@ -832,15 +967,24 @@ async function fetchStats(){
       await saveState({firstRedCard:state.firstRedCard});
     }
     if(d.goalsByTeam?.length){
-      const ts=[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored)[0];
-      const tc=[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded)[0];
-      // Always update from real data — standings change as tournament progresses
+      const sorted=[...d.goalsByTeam].sort((a,b)=>b.scored-a.scored);
+      const sortedC=[...d.goalsByTeam].sort((a,b)=>b.conceded-a.conceded);
+      // Find all teams tied for top scorer and most conceded
+      const topGoals=sorted[0]?.scored||0;
+      const topConceded=sortedC[0]?.conceded||0;
+      const topTeams=sorted.filter(t=>t.scored===topGoals).map(t=>t.team);
+      const concededTeams=sortedC.filter(t=>t.conceded===topConceded).map(t=>t.team);
       let ch={};
-      if(ts && state.topScorerTeam!==ts.team){state.topScorerTeam=ts.team;ch.topScorerTeam=ts.team;}
-      if(tc && state.mostConcededTeam!==tc.team){state.mostConcededTeam=tc.team;ch.mostConcededTeam=tc.team;}
+      const newTop=topTeams.join(',');
+      const newConc=concededTeams.join(',');
+      if(newTop && state.topScorerTeam!==newTop){state.topScorerTeam=newTop;ch.topScorerTeam=newTop;}
+      if(newConc && state.mostConcededTeam!==newConc){state.mostConcededTeam=newConc;ch.mostConcededTeam=newConc;}
       if(Object.keys(ch).length) await saveState(ch);
     }
-    u.textContent="Updated "+new Date().toLocaleTimeString();
+    state.statsData = d;
+    state.statsUpdated = new Date().toLocaleTimeString();
+    u.textContent="Updated "+state.statsUpdated;
+    saveState({statsData:state.statsData, statsUpdated:state.statsUpdated}).catch(()=>{});
     renderStats(d);
     renderPotBar();
     renderPrizes();
@@ -863,10 +1007,28 @@ function renderStats(d){
   }
   if(d.totalMatches===0){h+='<div class="empty">No matches played yet — stats will appear once the tournament begins.</div>';c.innerHTML=h;return;}
   h+=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">`;
-  // Top scorers
+  // Top scorers — group by team, sum goals
   if(d.topScorers?.length){
-    h+=`<div><div class="slabel">Top scorers</div><div class="twrap"><table class="tbl"><tbody>`;
-    d.topScorers.forEach(s=>{h+=`<tr><td style="white-space:nowrap">${tf(s.team)}${s.player}</td><td style="font-size:10px;color:var(--grey);white-space:nowrap">${s.team}</td><td style="font-weight:700;text-align:right;width:24px">${s.goals}</td></tr>`;});
+    // Aggregate goals per team
+    const teamGoals={};
+    d.topScorers.forEach(s=>{
+      if(!teamGoals[s.team]) teamGoals[s.team]={team:s.team,goals:0,players:[]};
+      teamGoals[s.team].goals+=s.goals;
+      teamGoals[s.team].players.push({name:s.player,goals:s.goals});
+    });
+    const teamList=Object.values(teamGoals).sort((a,b)=>b.goals-a.goals);
+    const maxG=Math.max(...teamList.map(t=>t.goals),1);
+    h+=`<div><div class="slabel">Top scoring teams</div><div class="twrap"><table class="tbl"><tbody>`;
+    teamList.slice(0,8).forEach(t=>{
+      const p=Math.round(t.goals/maxG*100);
+      const playerNames=t.players.sort((a,b)=>b.goals-a.goals).map(p=>`${p.name} (${p.goals})`).join(', ');
+      h+=`<tr>
+        <td style="white-space:nowrap">${tf(t.team)}${t.team}</td>
+        <td style="font-size:10px;color:var(--grey);overflow:hidden;text-overflow:ellipsis;max-width:140px">${playerNames}</td>
+        <td style="font-weight:700;text-align:right;width:24px">${t.goals}</td>
+        <td style="width:60px"><span class="bar-w"><span class="bar-f" style="width:${p}%"></span></span></td>
+      </tr>`;
+    });
     h+=`</tbody></table></div></div>`;
   } else if(d.goalsByTeam?.length){
     const maxG=Math.max(...d.goalsByTeam.map(t=>t.scored),1);
