@@ -41,6 +41,8 @@ function writeLocal(state) {
   } catch(e) { console.error('writeLocal:', e.message); return false; }
 }
 
+const STATS_CACHE_VERSION = '2'; // bump to invalidate cached statsData
+
 async function readState() {
   const binId  = process.env.JSONBIN_BIN_ID;
   const apiKey = process.env.JSONBIN_API_KEY;
@@ -51,7 +53,16 @@ async function readState() {
       });
       if (r.ok) {
         const data = await r.json();
-        return { ...DEFAULT_STATE, ...data };
+        const state = { ...DEFAULT_STATE, ...data };
+        // Clear cached stats if version changed — forces fresh fetch with fixed names
+        if (state.statsCacheVersion !== STATS_CACHE_VERSION) {
+          state.statsData = null;
+          state.statsUpdated = '';
+          state.statsCacheVersion = STATS_CACHE_VERSION;
+          // Save the cleared state back so all devices get clean data
+          writeState(state).catch(() => {});
+        }
+        return state;
       }
     } catch(e) { console.error('JSONBin read error:', e.message); }
   }
@@ -186,9 +197,16 @@ app.get('/api/scores', async (req, res) => {
     const relevant = [...live, ...finished, ...upcoming];
 
     const NAME_MAP2 = {
-      'Korea Republic': 'South Korea', 'Czechia': 'Czech Republic',
-      'Bosnia and Herzegovina': 'Bosnia & Herz.', "Côte d'Ivoire": 'Ivory Coast',
-      'Ivory Coast': 'Ivory Coast', 'Turkey': 'Türkiye', 'Curacao': 'Curaçao',
+      'Korea Republic':        'South Korea',
+      'Czechia':               'Czech Republic',
+      'Bosnia and Herzegovina':'Bosnia & Herz.',
+      'Bosnia-H.':             'Bosnia & Herz.',
+      'Bosnia & Herzegovina':  'Bosnia & Herz.',
+      "Côte d'Ivoire":         'Ivory Coast',
+      'Ivory Coast':           'Ivory Coast',
+      'Turkey':                'Türkiye',
+      'Curacao':               'Curaçao',
+      'Congo DR':              'DR Congo',
     };
     const nn = n => NAME_MAP2[n] || n;
 
@@ -269,7 +287,7 @@ app.get('/api/stats', async (req, res) => {
     // Fetch all matches and scorers in parallel
     const [matchesRes, scorersRes] = await Promise.all([
       fetch('https://api.football-data.org/v4/competitions/WC/matches', { headers: { 'X-Auth-Token': apiKey } }),
-      fetch('https://api.football-data.org/v4/competitions/WC/scorers?limit=20', { headers: { 'X-Auth-Token': apiKey } })
+      fetch('https://api.football-data.org/v4/competitions/WC/scorers?limit=100', { headers: { 'X-Auth-Token': apiKey } })
     ]);
 
     if (!matchesRes.ok) {
@@ -290,9 +308,17 @@ app.get('/api/stats', async (req, res) => {
     const teamStats = {};
 
     const NAME_MAP = {
-      'Korea Republic': 'South Korea', 'Czechia': 'Czech Republic',
-      'Bosnia and Herzegovina': 'Bosnia & Herz.', "Côte d'Ivoire": 'Ivory Coast',
-      'Turkey': 'Türkiye', 'Curacao': 'Curaçao',
+      'Korea Republic':        'South Korea',
+      'Czechia':               'Czech Republic',
+      'Bosnia and Herzegovina':'Bosnia & Herz.',
+      'Bosnia-H.':             'Bosnia & Herz.',
+      'Bosnia & Herzegovina':  'Bosnia & Herz.',
+      "Côte d'Ivoire":         'Ivory Coast',
+      'Turkey':                'Türkiye',
+      'Curacao':               'Curaçao',
+      'Congo DR':              'DR Congo',
+      'DR Congo':              'DR Congo',
+      'Republic of Ireland':   'Ireland',
     };
     const nn = n => NAME_MAP[n] || n;
 
@@ -318,20 +344,29 @@ app.get('/api/stats', async (req, res) => {
       .map(([team, s]) => ({ team, scored: s.scored, conceded: s.conceded }))
       .sort((a, b) => b.scored - a.scored || a.team.localeCompare(b.team));
 
-    // Top scorers from the scorers endpoint
-    const topScorers = (scorerData.scorers || []).slice(0, 10).map(s => ({
-      player: s.player?.name,
-      team:   nn(s.team?.shortName || s.team?.name),
-      goals:  s.goals
-    }));
+    // Top scorers — normalise team names to match our goalsByTeam
+    // Also add a teamGoals field so the grouped view matches totalGoals
+    const topScorers = (scorerData.scorers || []).slice(0, 20).map(s => {
+      const teamName = nn(s.team?.shortName || s.team?.name);
+      // Find this team's total in goalsByTeam for consistency
+      const teamTotal = goalsByTeam.find(t => t.team === teamName);
+      return {
+        player: s.player?.name,
+        team:   teamName,
+        goals:  s.goals,
+        teamTotalGoals: teamTotal?.scored ?? s.goals
+      };
+    });
 
+    // Also send goalsByTeam sorted so top scoring team is first — this is the
+    // authoritative source for prize calculation (derived from match results)
     res.json({
       ok: true,
       totalGoals,
       totalMatches,
       avgGoalsPerMatch: totalMatches > 0 ? (totalGoals / totalMatches).toFixed(2) : 0,
-      totalRedCards: null,   // not available on free tier
-      firstRedCard: null,    // not available on free tier
+      totalRedCards: null,
+      firstRedCard: null,
       goalsByTeam,
       topScorers
     });
