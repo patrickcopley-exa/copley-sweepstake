@@ -18,7 +18,6 @@ const DEFAULT_STATE = {
   participants: [], winner: '', runnerUp: '',
   firstRedCard: '', topScorerTeam: '', mostConcededTeam: ''
 };
-const STATE_KEY = 'sweepstake_state'; // Redis key used in Upstash
 
 function ensureDataDir() {
   const dir = path.join(__dirname, 'data');
@@ -45,51 +44,47 @@ function writeLocal(state) {
 const STATS_CACHE_VERSION = '2'; // bump to invalidate cached statsData
 
 async function readState() {
-  const url   = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (url && token) {
+  const binId  = process.env.JSONBIN_BIN_ID;
+  const apiKey = process.env.JSONBIN_API_KEY;
+  if (binId && apiKey) {
     try {
-      const r = await fetch(`${url}/get/${STATE_KEY}`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}/latest`, {
+        headers: { 'X-Master-Key': apiKey, 'X-Bin-Meta': 'false' }
       });
       if (r.ok) {
-        const json = await r.json();
-        if (json.result) {
-          const data = JSON.parse(json.result);
-          const state = { ...DEFAULT_STATE, ...data };
-          // Clear cached stats if version changed — forces fresh fetch with fixed names
-          if (state.statsCacheVersion !== STATS_CACHE_VERSION) {
-            state.statsData = null;
-            state.statsUpdated = '';
-            state.statsCacheVersion = STATS_CACHE_VERSION;
-            writeState(state).catch(() => {});
-          }
-          return state;
+        const data = await r.json();
+        const state = { ...DEFAULT_STATE, ...data };
+        // Clear cached stats if version changed — forces fresh fetch with fixed names
+        if (state.statsCacheVersion !== STATS_CACHE_VERSION) {
+          state.statsData = null;
+          state.statsUpdated = '';
+          state.statsCacheVersion = STATS_CACHE_VERSION;
+          // Save the cleared state back so all devices get clean data
+          writeState(state).catch(() => {});
         }
-        // No data yet in Upstash — return default so caller can seed it
-        return { ...DEFAULT_STATE };
+        return state;
       }
-    } catch(e) { console.error('Upstash read error:', e.message); }
+    } catch(e) { console.error('JSONBin read error:', e.message); }
   }
   // Fallback to local file
   return readLocal();
 }
 
 async function writeState(state) {
-  const url   = process.env.UPSTASH_REDIS_REST_URL;
-  const token = process.env.UPSTASH_REDIS_REST_TOKEN;
-  if (url && token) {
+  const binId  = process.env.JSONBIN_BIN_ID;
+  const apiKey = process.env.JSONBIN_API_KEY;
+  if (binId && apiKey) {
     try {
-      const r = await fetch(`${url}/set/${STATE_KEY}`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(JSON.stringify(state)) // double-encode: Redis stores the JSON string as the value
+      const r = await fetch(`https://api.jsonbin.io/v3/b/${binId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Master-Key': apiKey },
+        body: JSON.stringify(state)
       });
-      if (r.ok) return state;
-    } catch(e) { console.error('Upstash write error:', e.message); }
+      if (r.ok) {
+        const data = await r.json();
+        return data.record || state;
+      }
+    } catch(e) { console.error('JSONBin write error:', e.message); }
   }
   // Fallback to local file
   writeLocal(state);
