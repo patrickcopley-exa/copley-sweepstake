@@ -235,6 +235,55 @@ app.get('/api/scores', async (req, res) => {
   }
 });
 
+// GET /api/knockout-results — all knockout stage match results (R32 onwards)
+app.get('/api/knockout-results', async (req, res) => {
+  try {
+    const apiKey = process.env.FOOTBALL_API_KEY;
+    if (!apiKey) return res.status(500).json({ ok: false, error: 'FOOTBALL_API_KEY not set in Railway Variables.' });
+
+    const r = await fetch('https://api.football-data.org/v4/competitions/WC/matches', {
+      headers: { 'X-Auth-Token': apiKey }
+    });
+    if (!r.ok) {
+      const txt = await r.text();
+      return res.status(500).json({ ok: false, error: `football-data.org ${r.status}: ${txt.slice(0,100)}` });
+    }
+    const data = await r.json();
+    const allMatches = data.matches || [];
+
+    const NAME_MAP3 = {
+      'Korea Republic':'South Korea','Czechia':'Czech Republic',
+      'Bosnia and Herzegovina':'Bosnia & Herz.','Bosnia-H.':'Bosnia & Herz.',
+      'Bosnia & Herzegovina':'Bosnia & Herz.',"Côte d'Ivoire":'Ivory Coast',
+      'Turkey':'Türkiye','Curacao':'Curaçao','Congo DR':'DR Congo',
+    };
+    const nn3 = n => NAME_MAP3[n] || n;
+
+    // Knockout matches have a 'stage' that isn't a group stage, OR a 'matchday'/'lastUpdated'
+    // football-data.org marks knockout stage with stage values like LAST_32, LAST_16, QUARTER_FINALS, etc.
+    const knockoutStages = ['LAST_32','LAST_16','QUARTER_FINALS','SEMI_FINALS','THIRD_PLACE','FINAL'];
+    const knockoutMatches = allMatches.filter(m => knockoutStages.includes(m.stage));
+
+    const results = knockoutMatches.map(m => ({
+      matchNumber: m.matchday || null, // football-data doesn't expose FIFA match numbers directly
+      homeTeam: nn3(m.homeTeam?.shortName || m.homeTeam?.name || ''),
+      awayTeam: nn3(m.awayTeam?.shortName || m.awayTeam?.name || ''),
+      homeScore: m.score.fullTime.home,
+      awayScore: m.score.fullTime.away,
+      winner: m.score.winner, // 'HOME_TEAM' | 'AWAY_TEAM' | 'DRAW' (penalties resolve draws in real bracket)
+      penalties: m.score.penalties || null,
+      status: m.status,
+      stage: m.stage,
+      utcDate: m.utcDate
+    }));
+
+    res.json({ ok: true, results });
+  } catch(err) {
+    console.error('Knockout results error:', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /api/standings — all group tables
 app.get('/api/standings', async (req, res) => {
   try {
