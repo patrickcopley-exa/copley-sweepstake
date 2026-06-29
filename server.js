@@ -374,16 +374,23 @@ app.get('/api/stats', async (req, res) => {
     finished.forEach(m => {
       const ht = nn(m.homeTeam.shortName || m.homeTeam.name);
       const at = nn(m.awayTeam.shortName || m.awayTeam.name);
+      // Use regular time scores only — exclude penalty shootout goals
+      // For knockout matches that went to penalties, fullTime score = 90min + ET score (no pens)
+      // football-data.org stores penalty scores separately in score.penalties, so fullTime is already correct
       const hg = m.score.fullTime.home || 0;
       const ag = m.score.fullTime.away || 0;
-      totalGoals += hg + ag;
+      // Double-check: if penalties were taken, fullTime should equal regularTime
+      // Some APIs include penalty goals in fullTime — use regularTime if available to be safe
+      const hgSafe = (m.score.regularTime?.home != null) ? m.score.regularTime.home : hg;
+      const agSafe = (m.score.regularTime?.away != null) ? m.score.regularTime.away : ag;
+      totalGoals += hgSafe + agSafe;
 
       if (!teamStats[ht]) teamStats[ht] = { scored: 0, conceded: 0 };
       if (!teamStats[at]) teamStats[at] = { scored: 0, conceded: 0 };
-      teamStats[ht].scored   += hg;
-      teamStats[ht].conceded += ag;
-      teamStats[at].scored   += ag;
-      teamStats[at].conceded += hg;
+      teamStats[ht].scored   += hgSafe;
+      teamStats[ht].conceded += agSafe;
+      teamStats[at].scored   += agSafe;
+      teamStats[at].conceded += hgSafe;
 
       // Note: bookings/cards not available on free tier of football-data.org
       // Red card tracking requires a paid plan
