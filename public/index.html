@@ -1122,7 +1122,13 @@ async function updateKnockout(){
 
 function buildBracket(){
   const groups=liveGroups;const best3=getBest3rds(groups);const best3Map={};best3.forEach(t=>best3Map[t.group]=t);const qualGroups=best3.map(t=>t.group).sort().join("");const combo=ANNEX_C[qualGroups];
-  const w=(l)=>makeSlot(groups,l,1);const r=(l)=>makeSlot(groups,l,2);const a=(idx,fb)=>combo?makeThird(combo[idx],best3Map,groups):{name:fb,flag:"",cls:"tbd"};
+  const w=(l)=>makeSlot(groups,l,1);const r=(l)=>makeSlot(groups,l,2);const a=(idx,fb)=>{
+    if(combo) return makeThird(combo[idx],best3Map,groups);
+    // No exact Annex C match yet (common mid-tournament) — show best3 in ranked order instead of blank
+    const t=best3[idx];
+    if(t) return {name:t.team, flag:t.flag||"", cls:"third-s"};
+    return {name:fb,flag:"",cls:"tbd"};
+  };
   const r32=[{num:73,t1:r("A"),t2:r("B")},{num:74,t1:w("E"),t2:a(3,"Best 3rd")},{num:75,t1:w("F"),t2:r("C")},{num:76,t1:w("C"),t2:r("F")},{num:77,t1:w("I"),t2:a(5,"Best 3rd")},{num:78,t1:r("E"),t2:r("I")},{num:79,t1:w("A"),t2:a(0,"Best 3rd")},{num:80,t1:w("L"),t2:a(7,"Best 3rd")},{num:81,t1:w("D"),t2:a(2,"Best 3rd")},{num:82,t1:w("G"),t2:a(4,"Best 3rd")},{num:83,t1:r("K"),t2:r("L")},{num:84,t1:w("H"),t2:r("J")},{num:85,t1:w("B"),t2:a(1,"Best 3rd")},{num:86,t1:w("J"),t2:r("H")},{num:87,t1:w("K"),t2:a(6,"Best 3rd")},{num:88,t1:r("D"),t2:r("G")}];
   const tbdp=(a,b)=>[{name:`W M${a}`,flag:"",cls:"tbd"},{name:`W M${b}`,flag:"",cls:"tbd"}];
   const r16=[tbdp(73,74),tbdp(75,76),tbdp(77,78),tbdp(79,80),tbdp(81,82),tbdp(83,84),tbdp(85,86),tbdp(87,88)];
