@@ -489,8 +489,9 @@ async function loadState(){
         body: JSON.stringify(state)
       }).catch(()=>{});
     }
-    // Restore cached scores, standings and stats if available
+    // Restore cached scores, standings, stats and knockout results if available
     if(state.groups?.length){ liveGroups = state.groups; }
+    if(state.knockoutResults?.length){ knockoutResults = state.knockoutResults; }
     setSyncStatus("ok");
     renderAll();
     // Re-render prizes and stats from cached data so everything is up to date on load
@@ -1092,12 +1093,17 @@ function getBest3rds(groups){const t=[];groups.forEach(g=>{const s=sortedT(g);if
 function makeSlot(groups,letter,pos){const g=groups.find(g=>g.name==="Group "+letter);if(!g)return{name:`${pos===1?"Winner":"Runner-up"} Grp ${letter}`,flag:"",cls:"tbd"};const s=sortedT(g);const t=s[pos-1];if(!t)return{name:`${pos===1?"1st":"2nd"} Grp ${letter}`,flag:"",cls:"tbd"};const cls=pos===1?"winner-s":"runner-s";if(!g.teams.some(x=>x.played>0))return{name:`${pos===1?"1st":"2nd"} Grp ${letter}`,flag:t.flag||"",cls};return{name:t.team,flag:t.flag||"",cls};}
 function makeThird(code,best3Map,groups){const grp=code.replace("3","");const t=best3Map[grp];if(t)return{name:t.team,flag:t.flag||"",cls:"third-s"};const g=groups.find(g=>g.name==="Group "+grp);if(g){const s=sortedT(g);const t3=s[2];if(t3)return{name:`3rd Grp ${grp}`,flag:t3.flag||"",cls:"third-s"};}return{name:`3rd Grp ${grp}`,flag:"",cls:"tbd"};}
 
+let knockoutResults = []; // cached knockout match results
+
 async function updateKnockout(){
   const u = document.getElementById("upd-knockout");
-  u.textContent = "Fetching latest standings…";
+  u.textContent = "Fetching latest standings and results…";
   try {
-    const r = await fetch('/api/standings');
-    const d = await r.json();
+    const [standRes, koRes] = await Promise.all([
+      fetch('/api/standings'),
+      fetch('/api/knockout-results')
+    ]);
+    const d = await standRes.json();
     if(!d.ok) throw new Error(d.error||'Failed');
     if(d.groups?.length){
       liveGroups = d.groups.map(g=>{
@@ -1111,33 +1117,121 @@ async function updateKnockout(){
       state.standingsUpdated = new Date().toLocaleTimeString();
       saveState({ groups: state.groups, standingsUpdated: state.standingsUpdated }).catch(()=>{});
     }
+    // Knockout results — non-fatal if this fails
+    try {
+      const kd = await koRes.json();
+      if(kd.ok && kd.results) {
+        knockoutResults = kd.results;
+        state.knockoutResults = knockoutResults;
+        state.knockoutUpdated = new Date().toLocaleTimeString();
+        saveState({ knockoutResults: state.knockoutResults, knockoutUpdated: state.knockoutUpdated }).catch(()=>{});
+      }
+    } catch(e2) { console.error("Knockout results fetch failed:", e2); }
+
     buildBracket();
     u.textContent = "Updated — " + new Date().toLocaleTimeString();
   } catch(e) {
-    // Fall back to whatever standings we already have cached
     buildBracket();
     u.textContent = "Could not fetch latest — showing cached standings";
   }
+}
+
+// Find a knockout result matching two team names (in either order)
+function findKnockoutResult(team1Name, team2Name){
+  if(!team1Name || !team2Name) return null;
+  return knockoutResults.find(r =>
+    (r.homeTeam===team1Name && r.awayTeam===team2Name) ||
+    (r.homeTeam===team2Name && r.awayTeam===team1Name)
+  ) || null;
+}
+
+// Determine winner team name from a result, accounting for penalties
+function getWinnerFromResult(result){
+  if(!result) return null;
+  if(result.status !== 'FINISHED') return null;
+  if(result.winner === 'HOME_TEAM') return result.homeTeam;
+  if(result.winner === 'AWAY_TEAM') return result.awayTeam;
+  if(result.winner === 'DRAW' && result.penalties){
+    // penalties object shape varies; fall back to scores if present
+    if(result.penalties.homeTeam != null && result.penalties.awayTeam != null){
+      return result.penalties.homeTeam > result.penalties.awayTeam ? result.homeTeam : result.awayTeam;
+    }
+  }
+  return null;
 }
 
 function buildBracket(){
   const groups=liveGroups;const best3=getBest3rds(groups);const best3Map={};best3.forEach(t=>best3Map[t.group]=t);const qualGroups=best3.map(t=>t.group).sort().join("");const combo=ANNEX_C[qualGroups];
   const w=(l)=>makeSlot(groups,l,1);const r=(l)=>makeSlot(groups,l,2);const a=(idx,fb)=>{
     if(combo) return makeThird(combo[idx],best3Map,groups);
-    // No exact Annex C match yet (common mid-tournament) — show best3 in ranked order instead of blank
     const t=best3[idx];
     if(t) return {name:t.team, flag:t.flag||"", cls:"third-s"};
     return {name:fb,flag:"",cls:"tbd"};
   };
   const r32=[{num:73,t1:r("A"),t2:r("B")},{num:74,t1:w("E"),t2:a(3,"Best 3rd")},{num:75,t1:w("F"),t2:r("C")},{num:76,t1:w("C"),t2:r("F")},{num:77,t1:w("I"),t2:a(5,"Best 3rd")},{num:78,t1:r("E"),t2:r("I")},{num:79,t1:w("A"),t2:a(0,"Best 3rd")},{num:80,t1:w("L"),t2:a(7,"Best 3rd")},{num:81,t1:w("D"),t2:a(2,"Best 3rd")},{num:82,t1:w("G"),t2:a(4,"Best 3rd")},{num:83,t1:r("K"),t2:r("L")},{num:84,t1:w("H"),t2:r("J")},{num:85,t1:w("B"),t2:a(1,"Best 3rd")},{num:86,t1:w("J"),t2:r("H")},{num:87,t1:w("K"),t2:a(6,"Best 3rd")},{num:88,t1:r("D"),t2:r("G")}];
-  const tbdp=(a,b)=>[{name:`W M${a}`,flag:"",cls:"tbd"},{name:`W M${b}`,flag:"",cls:"tbd"}];
-  const r16=[tbdp(73,74),tbdp(75,76),tbdp(77,78),tbdp(79,80),tbdp(81,82),tbdp(83,84),tbdp(85,86),tbdp(87,88)];
-  const qf=[tbdp("R16-1","R16-2"),tbdp("R16-3","R16-4"),tbdp("R16-5","R16-6"),tbdp("R16-7","R16-8")];
-  const sf=[tbdp("QF1","QF2"),tbdp("QF3","QF4")];
+
+  // Resolve the actual winner of an R32 match by looking up the real result
+  // using the two team names we computed for that slot (only works once both
+  // slots are real teams, not TBD placeholders)
+  function resolveMatchWinner(t1, t2){
+    if(!t1 || !t2 || t1.cls==="tbd" || t2.cls==="tbd") return null;
+    const result = findKnockoutResult(t1.name, t2.name);
+    const winnerName = getWinnerFromResult(result);
+    if(!winnerName) return null;
+    const winnerTeam = (t1.name===winnerName) ? t1 : t2;
+    return { name: winnerTeam.name, flag: winnerTeam.flag||"", cls: "winner-s" };
+  }
+
+  // Annotate each R32 match with its resolved winner (or null if not yet decided)
+  r32.forEach(m => { m.winner = resolveMatchWinner(m.t1, m.t2); });
+
+  // Build a slot for Round of 16 — shows the real winner if known, otherwise "W M##"
+  function r16Slot(matchNum){
+    const m = r32.find(x => x.num === matchNum);
+    if(m && m.winner) return m.winner;
+    return { name:`W M${matchNum}`, flag:"", cls:"tbd" };
+  }
+
+  const r16pairs = [[73,74],[75,76],[77,78],[79,80],[81,82],[83,84],[85,86],[87,88]];
+  const r16 = r16pairs.map(([a,b]) => ({ t1:r16Slot(a), t2:r16Slot(b) }));
+  r16.forEach(m => { m.winner = resolveMatchWinner(m.t1, m.t2); });
+
+  function qfSlot(r16Index){
+    const m = r16[r16Index];
+    if(m && m.winner) return m.winner;
+    return { name:`W R16-${r16Index+1}`, flag:"", cls:"tbd" };
+  }
+  const qfPairs = [[0,1],[2,3],[4,5],[6,7]];
+  const qf = qfPairs.map(([a,b]) => ({ t1:qfSlot(a), t2:qfSlot(b) }));
+  qf.forEach(m => { m.winner = resolveMatchWinner(m.t1, m.t2); });
+
+  function sfSlot(qfIndex){
+    const m = qf[qfIndex];
+    if(m && m.winner) return m.winner;
+    return { name:`W QF${qfIndex+1}`, flag:"", cls:"tbd" };
+  }
+  const sfPairs = [[0,1],[2,3]];
+  const sf = sfPairs.map(([a,b]) => ({ t1:sfSlot(a), t2:sfSlot(b) }));
+  sf.forEach(m => { m.winner = resolveMatchWinner(m.t1, m.t2); });
+
+  function finalSlot(sfIndex){
+    const m = sf[sfIndex];
+    if(m && m.winner) return m.winner;
+    return { name:`W SF${sfIndex+1}`, flag:"", cls:"tbd" };
+  }
+  const finalMatch = { t1: finalSlot(0), t2: finalSlot(1) };
+
   function rt(t){return `<div class="bteam ${t.cls||''}"><span class="bteam-flag">${t.flag||""}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${t.cls==='tbd'?"8px":"9px"}">${t.name}</span></div>`;}
   function rm(t1,t2,num,isFinal){return `<div class="bmatch${isFinal?" final-match":""}"><div class="bmatch-num">${num?"M"+num:""}</div>${rt(t1)}${rt(t2)}</div>`;}
-  function rr(title,pairs,isFinal){return `<div class="bround"><div class="bround-hdr">${title}</div><div class="bslots">${pairs.map(p=>Array.isArray(p)?rm(p[0],p[1],null,isFinal):rm(p.t1,p.t2,p.num,isFinal)).join("")}</div></div>`;}
-  document.getElementById("bracket-container").innerHTML=rr("Round of 32",r32)+rr("Round of 16",r16)+rr("Quarter-finals",qf)+rr("Semi-finals",sf)+rr("Final — MetLife",[[{name:"SF Winner 1",flag:"",cls:"tbd"},{name:"SF Winner 2",flag:"",cls:"tbd"}]],true);
+  function rr(title,pairs,isFinal){return `<div class="bround"><div class="bround-hdr">${title}</div><div class="bslots">${pairs.map(p=>rm(p.t1,p.t2,p.num,isFinal)).join("")}</div></div>`;}
+
+  document.getElementById("bracket-container").innerHTML=
+    rr("Round of 32",r32)+
+    rr("Round of 16",r16)+
+    rr("Quarter-finals",qf)+
+    rr("Semi-finals",sf)+
+    rr("Final — MetLife",[finalMatch],true);
+
   const tp=document.getElementById("third-place-info");
   const allZero=groups.every(g=>g.teams.every(t=>t.played===0));
   if(allZero){tp.innerHTML=`<div class="empty">3rd-place slots shown once group games begin. Tournament starts <strong>June 11, 2026</strong>.</div>`;}
