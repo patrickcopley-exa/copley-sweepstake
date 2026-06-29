@@ -1222,7 +1222,23 @@ function buildBracket(){
   const finalMatch = { t1: finalSlot(0), t2: finalSlot(1) };
 
   function rt(t){return `<div class="bteam ${t.cls||''}"><span class="bteam-flag">${t.flag||""}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:${t.cls==='tbd'?"8px":"9px"}">${t.name}</span></div>`;}
-  function rm(t1,t2,num,isFinal){return `<div class="bmatch${isFinal?" final-match":""}"><div class="bmatch-num">${num?"M"+num:""}</div>${rt(t1)}${rt(t2)}</div>`;}
+  function scoreStr(t1, t2){
+    const res = findKnockoutResult(t1.name, t2.name);
+    if(!res || res.status !== 'FINISHED') return null;
+    const hs = res.homeTeam===t1.name ? res.homeScore : res.awayScore;
+    const as2 = res.homeTeam===t1.name ? res.awayScore : res.homeScore;
+    const hasPens = res.penalties && res.penalties.homeTeam != null;
+    const ps = hasPens ? (res.homeTeam===t1.name ? res.penalties.homeTeam : res.penalties.awayTeam) : null;
+    const pa = hasPens ? (res.homeTeam===t1.name ? res.penalties.awayTeam : res.penalties.homeTeam) : null;
+    let s = `${hs} – ${as2}`;
+    if(hasPens) s += ` (${ps}–${pa} pens)`;
+    return s;
+  }
+  function rm(t1,t2,num,isFinal){
+    const score = scoreStr(t1,t2);
+    const scoreHtml = score ? `<div style="font-family:'Montserrat',sans-serif;font-size:9px;font-weight:700;color:var(--gold-dark);text-align:center;padding:2px 6px;background:var(--gold-light);border-top:1px solid var(--grey-light)">${score}</div>` : '';
+    return `<div class="bmatch${isFinal?" final-match":""}"><div class="bmatch-num">${num?"M"+num:""}</div>${rt(t1)}${rt(t2)}${scoreHtml}</div>`;
+  }
   function rr(title,pairs,isFinal){return `<div class="bround"><div class="bround-hdr">${title}</div><div class="bslots">${pairs.map(p=>rm(p.t1,p.t2,p.num,isFinal)).join("")}</div></div>`;}
 
   document.getElementById("bracket-container").innerHTML=
